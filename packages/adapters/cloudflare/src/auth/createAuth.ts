@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import {
   createDpopReplayStore,
@@ -19,11 +20,39 @@ import { splitSetCookieHeader } from "better-auth/cookies";
 import { oauthProvider, type Scope } from "@better-auth/oauth-provider";
 import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
-import { decodeMemberCursor, encodeMemberCursor } from "@aotter/mantle-admin";
+import {
+  decodeMemberCursor,
+  encodeMemberCursor,
+  type OAuthConsentInfo,
+  type OAuthConsentRequest,
+} from "@aotter/mantle-admin";
 import type { EmailSender } from "@aotter/mantle-runtime";
 import { STAFF_ROLES, type StaffRole } from "@aotter/mantle-spec";
 
+// Better Auth 1.7.2 initializes its shared stores asynchronously. Seed them
+// before any request can be canceled; the accessor-identity regression test
+// pins this version-specific integration to the stores Better Auth uses.
+const betterAuthGlobalKey = Symbol.for("better-auth:global");
+const betterAuthGlobals = globalThis as typeof globalThis & {
+  [key: symbol]: BetterAuthGlobal | undefined;
+};
+const betterAuthGlobal = betterAuthGlobals[betterAuthGlobalKey] ??= {
+  version: "",
+  epoch: 0,
+  context: {},
+};
+betterAuthGlobal.context.requestStateAsyncStorage ??= new AsyncLocalStorage();
+betterAuthGlobal.context.endpointContextAsyncStorage ??= new AsyncLocalStorage();
+betterAuthGlobal.context.adapterAsyncStorage ??= new AsyncLocalStorage();
+
+interface BetterAuthGlobal {
+  version: string;
+  epoch: number;
+  context: Record<string, unknown>;
+}
+
 export { decodeMemberCursor, encodeMemberCursor };
+export type { OAuthConsentInfo, OAuthConsentRequest } from "@aotter/mantle-admin";
 export { STAFF_ROLES, type StaffRole };
 /**
  * Set lookup for "is this role string a staff role?" — handlers/MCP
@@ -203,6 +232,7 @@ export interface OAuthProviderConfig {
   readonly allowUnauthenticatedClientRegistration?: boolean;
   readonly clientRegistrationDefaultScopes?: ReadonlyArray<Scope>;
   readonly clientRegistrationAllowedScopes?: ReadonlyArray<Scope>;
+  /** MCP resources still require a persisted user consent; do not bypass it. */
   readonly cachedTrustedClients?: ReadonlySet<string>;
   /** Protected resources this authorization server may issue tokens for. */
   readonly resources?: ReadonlyArray<string>;
@@ -250,6 +280,7 @@ export interface RegisterOAuthClientInput {
   >;
   readonly responseTypes?: ReadonlyArray<"code">;
   readonly applicationType?: "web" | "native";
+  /** Not suitable for MCP clients: MCP access requires a persisted user consent. */
   readonly skipConsent?: boolean;
   readonly enableEndSession?: boolean;
   readonly requirePKCE?: boolean;
@@ -836,6 +867,11 @@ function buildAuth(config: CreateAuthConfig) {
             ? mcp({
                 ...providerOptions,
                 resource: config.oauthProvider.mcpResource,
+                extensions: [{
+                  claims: {
+                    accessToken: ({ referenceId }) => ({ mantle_consent_id: referenceId ?? null }),
+                  },
+                }],
               })
             : oauthProvider(providerOptions),
           ...(config.oauthProvider.mcpResource
@@ -845,8 +881,10 @@ function buildAuth(config: CreateAuthConfig) {
                   // runtime network boundary: resolution and connection stay
                   // on the public Internet. Better Auth owns timeout, limits,
                   // validation, caching, and redirect rejection above it.
+                  // Workers does not implement `redirect: "error"`; `manual`
+                  // exposes 3xx responses so Better Auth can reject them.
                   fetchClientMetadataResource: (input, init) =>
-                    fetch(input, { ...init, redirect: "error" }),
+                    fetch(input, { ...init, redirect: "manual" }),
                   metadataProfile: "mcp-2026-07-28",
                 }),
               ]
@@ -929,7 +967,7 @@ function buildAuth(config: CreateAuthConfig) {
       );
     }
   };
-  const databaseHooks = {
+  const databaseHooks: BetterAuthOptions["databaseHooks"] = {
     user: {
       create: {
         before: async (user: Readonly<Record<string, unknown>>, context: AuthHookContext) =>
@@ -939,6 +977,30 @@ function buildAuth(config: CreateAuthConfig) {
       update: {
         before: async (user: Readonly<Record<string, unknown>>, context: AuthHookContext) =>
           guardGithubLoginProfile(user, context, config.methods),
+      },
+    },
+    verification: {
+      create: {
+        before: async (verification) => {
+          if (!config.oauthProvider?.mcpResource) return;
+          let value;
+          try {
+            value = JSON.parse(verification.value) as {
+              type?: unknown; userId?: unknown; query?: { client_id?: unknown };
+            };
+          } catch {
+            return; // OTPs and other verification values are not OAuth grants.
+          }
+          if (value?.type !== "authorization_code" || typeof value.userId !== "string" ||
+              typeof value.query?.client_id !== "string") return;
+          const consent = await config.database
+            .prepare("SELECT id FROM oauthConsent WHERE userId = ? AND clientId = ? LIMIT 1")
+            .bind(value.userId, value.query.client_id)
+            .first<{ id: string }>();
+          // Better Auth carries referenceId from this code through every
+          // refresh rotation. Never rebind an old lineage to a new consent.
+          return { data: { value: JSON.stringify({ ...value, referenceId: consent?.id ?? "" }) } };
+        },
       },
     },
   };
@@ -1062,21 +1124,14 @@ export type OAuthAccessTokenVerification =
       readonly missingScopes?: readonly string[];
     };
 
-export interface OAuthConsentRequest {
-  readonly clientName: string;
-  readonly redirectUri: string;
-  readonly scopes: readonly string[];
-  /** Better Auth-signed authorization query. Return it unchanged with the
-   *  consent decision so Better Auth can verify the flow. */
-  readonly oauthQuery: string;
-}
-
 // Better Auth's full inferred type pulls plugin internals
 // (`AdminOptions`) that aren't re-exported, so emitting a .d.ts that
 // names that type fails (TS4058). The structural facade keeps the
 // public surface stable.
 export interface Auth {
   readonly basePath: string;
+  /** Better Auth's per-isolate context; Workers must anchor this before responding. */
+  readonly ready?: Promise<void>;
   /** Canonical MCP protected resource when this Auth owns one. */
   readonly mcpResource?: string;
   readonly handler: (request: Request) => Promise<Response>;
@@ -1125,6 +1180,15 @@ export interface Auth {
     request: Request,
     accept: boolean,
   ) => Promise<string>;
+  /** User-facing OAuth grants. Optional so custom Auth facades stay compatible. */
+  readonly listOAuthConsents?: (
+    userId: string,
+  ) => Promise<readonly OAuthConsentInfo[]>;
+  /** Revoke every token and consent row for one user/client grant. */
+  readonly revokeOAuthConsent?: (
+    userId: string,
+    consentId: string,
+  ) => Promise<boolean>;
   /** Methods the consumer registered, in declaration order. The admin
    *  SPA renders sign-in sections per this list. Secrets, senders, and
    *  per-provider extras are intentionally excluded — UI doesn't need
@@ -1205,6 +1269,10 @@ const LEGACY_DCR_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
 
 export function createAuth(config: CreateAuthConfig): Auth {
   const auth = buildAuth(config);
+  const ready = auth.$context.then(() => undefined);
+  // Observe eager initialization even for low-level callers; keep the original
+  // rejection available to callers awaiting ready and Better Auth's handlers.
+  void ready.catch(() => {});
   const basePath = normalizeAuthBasePath(config.basePath);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = auth.api as any;
@@ -1219,13 +1287,17 @@ export function createAuth(config: CreateAuthConfig): Auth {
   const verifyAccessToken = config.oauthProvider
     ? async (token: string, audience: string) => {
         const context = await auth.$context;
-        return verifyOAuthJwtWithLocalJwks(
+        const claims = await verifyOAuthJwtWithLocalJwks(
           token,
           audience,
           context.baseURL,
           async () => api.getJwks(),
           localJwksCacheKey,
         );
+        if (audience === config.oauthProvider?.mcpResource) {
+          await assertActiveMcpGrant(config.database, claims, audience);
+        }
+        return claims;
       }
     : null;
   let nextDcrCleanupAt = 0;
@@ -1250,6 +1322,7 @@ export function createAuth(config: CreateAuthConfig): Auth {
 
   return {
     basePath,
+    ready,
     ...(config.oauthProvider?.mcpResource
       ? { mcpResource: config.oauthProvider.mcpResource }
       : {}),
@@ -1380,6 +1453,69 @@ export function createAuth(config: CreateAuthConfig): Auth {
       }
       return result.url;
     },
+    ...(config.oauthProvider
+      ? {
+          listOAuthConsents: async (userId: string) => {
+            const result = await config.database
+              .prepare(
+                `SELECT consent.id, consent.clientId,
+                        COALESCE(client.name, consent.clientId) AS clientName,
+                        consent.scopes
+                   FROM oauthConsent AS consent
+                   LEFT JOIN oauthClient AS client ON client.clientId = consent.clientId
+                  WHERE consent.userId = ?
+                  ORDER BY consent.updatedAt DESC, consent.id ASC`,
+              )
+              .bind(userId)
+              .all<{
+                id: string;
+                clientId: string;
+                clientName: string;
+                scopes: string;
+              }>();
+            return (result.results ?? []).map((row) => ({
+              id: row.id,
+              clientId: row.clientId,
+              clientName: row.clientName,
+              scopes: parseStoredStringArray(row.scopes) ?? [],
+            }));
+          },
+          revokeOAuthConsent: async (userId: string, consentId: string) => {
+            const consent = await config.database
+              .prepare(
+                "SELECT clientId FROM oauthConsent WHERE id = ? AND userId = ? LIMIT 1",
+              )
+              .bind(consentId, userId)
+              .first<{ clientId: string }>();
+            if (!consent) return false;
+            const revokedAt = new Date().toISOString();
+            await config.database.batch([
+              config.database
+                .prepare(
+                  "UPDATE oauthRefreshToken SET revoked = ? WHERE userId = ? AND clientId = ? AND revoked IS NULL",
+                )
+                .bind(revokedAt, userId, consent.clientId),
+              config.database
+                .prepare(
+                  "UPDATE oauthAccessToken SET revoked = ? WHERE userId = ? AND clientId = ? AND revoked IS NULL",
+                )
+                .bind(revokedAt, userId, consent.clientId),
+              config.database
+                .prepare(
+                  `DELETE FROM verification
+                    WHERE CASE WHEN json_valid(value) THEN json_extract(value, '$.type') END = 'authorization_code'
+                      AND CASE WHEN json_valid(value) THEN json_extract(value, '$.userId') END = ?
+                      AND CASE WHEN json_valid(value) THEN json_extract(value, '$.query.client_id') END = ?`,
+                )
+                .bind(userId, consent.clientId),
+              config.database
+                .prepare("DELETE FROM oauthConsent WHERE userId = ? AND clientId = ?")
+                .bind(userId, consent.clientId),
+            ]);
+            return true;
+          },
+        }
+      : {}),
     methods: config.methods.map<AuthMethodInfo>((m) => {
       switch (m.kind) {
         case "social":
@@ -1689,6 +1825,57 @@ function scopesFromClaim(value: unknown): string[] {
     return value.filter((scope): scope is string => typeof scope === "string");
   }
   return [];
+}
+
+function parseStoredStringArray(value: unknown): string[] | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function assertActiveMcpGrant(
+  database: D1Database,
+  claims: Record<string, unknown>,
+  audience: string,
+): Promise<void> {
+  const userId = claims["sub"];
+  const clientId = claims["azp"];
+  const sessionId = claims["sid"];
+  const consentId = claims["mantle_consent_id"];
+  if (
+    typeof userId !== "string" ||
+    typeof clientId !== "string" ||
+    typeof sessionId !== "string" ||
+    typeof consentId !== "string" || !consentId
+  ) {
+    throw new Error("MCP token is not bound to a user session.");
+  }
+  const session = await database
+    .prepare(
+      "SELECT id FROM session WHERE id = ? AND userId = ? AND expiresAt > ? LIMIT 1",
+    )
+    .bind(sessionId, userId, new Date().toISOString())
+    .first<{ id: string }>();
+  if (!session) throw new Error("MCP token session is no longer active.");
+
+  const result = await database
+    .prepare(
+      "SELECT resources, scopes FROM oauthConsent WHERE id = ? AND userId = ? AND clientId = ?",
+    )
+    .bind(consentId, userId, clientId)
+    .first<{ resources: string | null; scopes: string }>();
+  const tokenScopes = scopesFromClaim(claims["scope"]);
+  const resources = parseStoredStringArray(result?.resources);
+  const scopes = parseStoredStringArray(result?.scopes);
+  const active = resources?.includes(audience) === true && scopes !== null &&
+    tokenScopes.every((scope) => scopes.includes(scope));
+  if (!active) throw new Error("MCP authorization grant is no longer active.");
 }
 
 type LocalJwksFetcher = Exclude<
