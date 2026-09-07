@@ -28,7 +28,15 @@ describe("mountMantleOAuth", () => {
     const res = await handleMantleOAuth(
       new Request("https://example.test/oauth/consent?sig=signed"),
       {
-        auth: stubAuth,
+        auth: {
+          ...stubAuth,
+          getOAuthConsentRequest: async () => ({
+            clientName: "Claude",
+            redirectUri: "https://client.example/callback",
+            scopes: ["mcp"],
+            oauthQuery: "signed=query",
+          }),
+        },
         assets,
       },
     );
@@ -38,6 +46,9 @@ describe("mountMantleOAuth", () => {
     expect(res?.headers.get("cache-control")).toBe("private, no-store");
     expect(res?.headers.get("referrer-policy")).toBe("same-origin");
     expect(res?.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(res?.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://client.example",
+    );
     expect(res?.headers.get("content-security-policy")).not.toContain("unsafe-inline");
 
     const connected = await handleMantleOAuth(
@@ -129,6 +140,9 @@ describe("mountMantleOAuth", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("referrer-policy")).toBe("same-origin");
     expect(res.headers.get("content-security-policy")).toContain("script-src 'nonce-");
+    expect(res.headers.get("content-security-policy")).toContain(
+      "form-action 'self' https://client.example",
+    );
     const html = await res.text();
     expect(html).toContain("Claude");
     expect(html).toMatch(/<script nonce="[^"]+">/u);
