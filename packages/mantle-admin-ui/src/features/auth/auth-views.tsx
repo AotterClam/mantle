@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { OAuthConsentInfo, OAuthConsentRequest } from "@aotter/mantle-admin";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2Icon, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -97,6 +98,9 @@ export function AccessDeniedView({
         <p className="mb-6 text-sm text-muted-foreground">
           {t(language, "auth.accessDenied.askOwner")}
         </p>
+        <Button variant="outline" className="mb-2 w-full" asChild>
+          <a href="/admin/connected-apps">{t(language, "oauth.connectedApps")}</a>
+        </Button>
         <Button variant="outline" className="w-full" onClick={signOut}>
           <LogOut className="me-2 size-4" aria-hidden />
           {t(language, "common.signOut")}
@@ -226,30 +230,16 @@ export function SignInView(): React.ReactElement {
   );
 }
 
-interface OAuthConsentModel {
-  readonly clientName: string;
-  readonly redirectUri: string;
-  readonly scopes: readonly string[];
-  readonly oauthQuery: string;
-}
-
-interface OAuthConsentInfo {
-  readonly id: string;
-  readonly clientId: string;
-  readonly clientName: string;
-  readonly scopes: readonly string[];
-}
-
 export function OAuthConsentView(): React.ReactElement {
   const { language } = usePreferences();
   const [submitting, setSubmitting] = React.useState<"approve" | "deny" | null>(null);
   const decision = React.useRef<HTMLInputElement>(null);
-  const consent = useQuery<OAuthConsentModel | null>({
+  const consent = useQuery<OAuthConsentRequest | null>({
     queryKey: ["oauth-consent", window.location.search],
     queryFn: async () => {
       const response = await fetch(`/oauth/consent/data${window.location.search}`);
       if (response.status === 401) return redirectToSignIn();
-      const body = await response.json() as { consent: OAuthConsentModel | null };
+      const body = await response.json() as { consent: OAuthConsentRequest | null };
       if (response.status === 400) return null;
       if (!response.ok) throw new Error(t(language, "common.failedToLoad"));
       return body.consent;
@@ -317,6 +307,17 @@ export function OAuthConsentView(): React.ReactElement {
             {t(language, "oauth.consent.deny")}
           </SignInButton>
         </form>
+      </CardContent>
+    </AuthPage>
+  );
+}
+
+/** Members can manage their own grants without access to staff Admin APIs. */
+export function ConnectedAppsPage(): React.ReactElement {
+  return (
+    <AuthPage wide>
+      <CardContent className="pt-6">
+        <ConnectedAppsView />
       </CardContent>
     </AuthPage>
   );

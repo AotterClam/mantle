@@ -14,13 +14,13 @@ import {
   createConventionalAuth,
   createConventionalBindings,
   createMcpApiHandler,
-  mountAuthorize,
   mountAdmin,
   mountRuntimeEndpoints,
   runMantleWorkerRequest,
   setupIncompleteAuthResponse,
   type MantleCloudflareEnv,
 } from "@aotter/mantle/cloudflare";
+import { mountMantleOAuth } from "@aotter/mantle/admin";
 import { plan } from "../.mantle/generated/mantle.js";
 
 interface Env extends MantleCloudflareEnv {
@@ -36,9 +36,13 @@ let assembled: ReturnType<typeof assemble> | undefined;
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return runMantleWorkerRequest(async () => {
-      assembled ??= assemble(env);
-      const incomplete = await setupIncompleteAuthResponse(request, assembled.auth);
-      const response = incomplete ?? await assembled.fetch(request, env, ctx);
+      const worker = assembled ??= assemble(env);
+      if (worker.auth.ready) ctx.waitUntil(worker.auth.ready.catch((error) => {
+        if (assembled === worker) assembled = undefined;
+        throw error;
+      }));
+      const incomplete = await setupIncompleteAuthResponse(request, worker.auth);
+      const response = incomplete ?? await worker.fetch(request, env, ctx);
       ctx.waitUntil(env.AUDIT_QUEUE.send({
         kind: "request-complete",
         path: new URL(request.url).pathname,
@@ -57,7 +61,7 @@ function assemble(env: Env) {
 
   mountRuntimeEndpoints(app, ref);
   if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
-  mountAuthorize(app, { auth });
+  mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
   app.get("/cache-probe", () => new Response("public", {
     headers: { "cache-control": "public, s-maxage=60" },
   }));

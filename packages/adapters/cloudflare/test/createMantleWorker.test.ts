@@ -83,6 +83,33 @@ describe("createMantleWorker", () => {
     expect(db.appliedMigrations.size).toBeGreaterThan(0);
   });
 
+  it("retries a failed Auth initialization on the next request", async () => {
+    const auth = vi.fn()
+      .mockImplementationOnce(() => ({ ...stubAuth, ready: Promise.reject(new Error("temporary init failure")) }))
+      .mockImplementation(() => ({ ...stubAuth, ready: Promise.resolve(), handler: async () => new Response("recovered") }));
+    const worker = createMantleWorker<TestEnv>({ plan: compileTestPlan([]), auth, bindings: testBindings });
+    expect((await fetchWorker(worker, "/mcp/staff", testEnv())).status).toBe(401);
+    const recovered = await fetchWorker(worker, "/api/auth/probe", testEnv());
+    expect(await recovered.text()).toBe("recovered");
+    expect(auth).toHaveBeenCalledTimes(2);
+  });
+
+  it("awaits Auth initialization when a scheduled or queue handler boots first", async () => {
+    let resolveReady!: () => void;
+    const ready = new Promise<void>((resolve) => { resolveReady = resolve; });
+    const worker = createMantleWorker<TestEnv>({
+      plan: compileTestPlan([]), auth: () => ({ ...stubAuth, ready }), bindings: testBindings,
+    });
+    const completed = vi.fn();
+    const boot = worker.getRuntime(testEnv()).then(completed);
+    // Runtime schema boot can finish without completing the Auth initialization.
+    await fetchWorker(worker, "/mcp/staff", testEnv());
+    expect(completed).not.toHaveBeenCalled();
+    resolveReady();
+    await boot;
+    expect(completed).toHaveBeenCalledOnce();
+  });
+
   it("boots before the initial MCP challenge and OAuth discovery", async () => {
     const db = new InMemoryDatabase();
     const ready = Promise.resolve();
@@ -131,6 +158,36 @@ describe("createMantleWorker", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/site-icon.png");
+  });
+
+  it("serves a site icon at /favicon.ico without redirecting to itself", async () => {
+    const worker = createMantleWorker<TestEnv>({
+      plan: compileTestPlan([]),
+      auth: () => stubAuth,
+      bindings: () => ({
+        db: new InMemoryDatabase(),
+        adminAssets: { fetch: async () => new Response("icon", { headers: { "content-type": "image/png" } }) },
+      }),
+      siteDefaults: { icons: [{ src: "/favicon.ico", mimeType: "image/png" }] },
+    });
+    const response = await fetchWorker(worker, "/favicon.ico", testEnv());
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.text()).toBe("icon");
+  });
+
+  it("preserves a consumer's existing favicon route", async () => {
+    const worker = createMantleWorker<TestEnv>({
+      plan: compileTestPlan([]),
+      auth: () => stubAuth,
+      bindings: testBindings,
+      extend: () => ({ mount: ({ app }) => {
+        app.get("/favicon.ico", (c) => c.text("consumer icon"));
+      } }),
+    });
+    const response = await fetchWorker(worker, "/favicon.ico", testEnv());
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("consumer icon");
   });
 
   it("passes Env and waitUntil to typed handlers", async () => {

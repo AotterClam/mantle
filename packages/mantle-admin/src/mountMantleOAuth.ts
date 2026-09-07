@@ -55,13 +55,12 @@ function oauthFormAction(redirectUri?: string): string {
 }
 
 function oauthPageHeaders(
-  nonce: string,
   redirectUri?: string,
 ): Record<string, string> {
   return {
     "cache-control": "private, no-store",
     "content-security-policy":
-      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; form-action ${oauthFormAction(redirectUri)}; frame-ancestors 'none'; base-uri 'none'`,
+      `default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; form-action ${oauthFormAction(redirectUri)}; frame-ancestors 'none'; base-uri 'none'`,
     "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
@@ -128,11 +127,10 @@ export async function handleMantleOAuth(
     const adminPage = await adminOAuthPage(request, assets, model?.redirectUri);
     if (adminPage) return adminPage;
     const locale = detectOAuthFallbackLocale(request.headers.get("accept-language"));
-    const nonce = crypto.randomUUID();
-    return new Response(renderConsentFallbackHtml(locale, model, nonce), {
+    return new Response(renderConsentFallbackHtml(locale, model), {
       status: model ? 200 : 400,
       headers: {
-        ...oauthPageHeaders(nonce, model?.redirectUri),
+        ...oauthPageHeaders(model?.redirectUri),
         "content-type": "text/html; charset=UTF-8",
       },
     });
@@ -166,10 +164,9 @@ export async function handleMantleOAuth(
       return redirectResponse("/admin/sign-in?return=%2Foauth%2Fconsents", 302);
     }
     const locale = detectOAuthFallbackLocale(request.headers.get("accept-language"));
-    const nonce = crypto.randomUUID();
     const consents = await auth.listOAuthConsents(session.user.id);
-    return new Response(renderConnectedAppsFallbackHtml(locale, consents, nonce), {
-      headers: { ...oauthPageHeaders(nonce), "content-type": "text/html; charset=UTF-8" },
+    return new Response(renderConnectedAppsFallbackHtml(locale, consents), {
+      headers: { ...oauthPageHeaders(), "content-type": "text/html; charset=UTF-8" },
     });
   }
 

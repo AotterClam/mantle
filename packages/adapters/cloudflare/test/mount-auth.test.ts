@@ -61,10 +61,10 @@ describe("mountTestEndpoints: /api/auth/* surface", () => {
     expect(handlerCalls).toHaveLength(0);
   });
 
-  it("falls through to Auth under default and custom base paths", async () => {
+  it.each(["/api/auth", "/api/platform/auth"])("falls through to Auth under %s", async (basePath) => {
     const handlerCalls: Request[] = [];
     const { app } = harness({
-      basePath: "/api/platform/auth",
+      basePath,
       methods: [{ kind: "social", provider: "github" }],
       handler: async (request) => {
         handlerCalls.push(request);
@@ -72,8 +72,8 @@ describe("mountTestEndpoints: /api/auth/* surface", () => {
       },
     });
 
-    expect((await app.request("/api/platform/auth/methods")).status).toBe(200);
-    const response = await app.request("/api/platform/auth/sign-in/social");
+    expect((await app.request(`${basePath}/methods`)).status).toBe(200);
+    const response = await app.request(`${basePath}/sign-in/social`);
     expect(await response.text()).toBe("ok-from-platform-auth");
     expect(handlerCalls).toHaveLength(1);
   });

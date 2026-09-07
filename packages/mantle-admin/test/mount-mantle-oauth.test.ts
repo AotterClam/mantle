@@ -110,13 +110,11 @@ describe("mountMantleOAuth", () => {
     }] });
   });
 
-  it("renders consent with the shared admin system tokens", () => {
-    const html = renderConsentHtml("en", null, "test-nonce");
-
-    expect(html).toContain("--mantle-blue-deep");
-    expect(html).toContain("background:var(--app-background)");
+  it("keeps the no-assets fallback minimal and accessible", () => {
+    const html = renderConsentHtml("en", null);
+    expect(html).toContain("color-scheme:light dark");
     expect(html).toContain("button:focus-visible");
-    expect(html).not.toContain("--navy:");
+    expect(html).not.toContain("<script");
   });
 
   it("renders the secret-free Better Auth consent projection", async () => {
@@ -139,48 +137,44 @@ describe("mountMantleOAuth", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("referrer-policy")).toBe("same-origin");
-    expect(res.headers.get("content-security-policy")).toContain("script-src 'nonce-");
+    expect(res.headers.get("content-security-policy")).toContain("script-src 'none'");
     expect(res.headers.get("content-security-policy")).toContain(
       "form-action 'self' https://client.example",
     );
     const html = await res.text();
     expect(html).toContain("Claude");
-    expect(html).toMatch(/<script nonce="[^"]+">/u);
+    expect(html).not.toContain("<script");
   });
 
-  it("locks both consent actions while preserving the submitted decision", () => {
+  it("submits either consent decision without JavaScript", () => {
     const html = renderConsentHtml("zh-TW", {
       clientName: "Claude",
       redirectUri: "https://client.example/callback",
       scopes: ["mcp"],
       oauthQuery: "signed=query",
-    }, "test-nonce");
+    });
 
-    expect(html).toContain('<input type="hidden" name="decision"/>');
-    expect(html).toContain('data-loading-label="連結中…"');
-    expect(html).toContain('data-loading-label="取消中…"');
+    expect(html).toContain('name="decision" value="approve"');
+    expect(html).toContain('name="decision" value="deny"');
     expect(html).toContain("仍會依照你的帳號權限決定");
     expect(html).not.toContain(">mcp<");
-    expect(html).toContain('this.setAttribute("aria-busy","true")');
-    expect(html).toContain('action.disabled=true');
-    expect(html).toContain('<script nonce="test-nonce">');
+    expect(html).not.toContain("<script");
   });
 
-  it("renders connected apps with a locked revoke action", () => {
+  it("renders connected apps with a native revoke form", () => {
     const html = renderConnectedAppsHtml("en", [{
       id: "consent-1",
       clientId: "https://client.example/metadata",
       clientName: "Claude",
       scopes: ["mcp"],
-    }], "test-nonce");
+    }]);
 
     expect(html).toContain("Connected apps");
     expect(html).toContain("Claude");
     expect(html).toContain('name="consent_id" value="consent-1"');
-    expect(html).toContain('data-loading-label="Disconnecting…"');
+    expect(html).toContain('action="/oauth/consents/revoke"');
     expect(html).not.toContain(">mcp<");
-    expect(html).toContain('form[data-submit-lock]');
-    expect(html).toContain('<script nonce="test-nonce">');
+    expect(html).not.toContain("<script");
   });
 
   it("lists and revokes only the current user's connected app", async () => {
@@ -207,7 +201,7 @@ describe("mountMantleOAuth", () => {
     const page = await app.request("https://example.test/oauth/consents");
     expect(page.status).toBe(200);
     expect(page.headers.get("cache-control")).toBe("private, no-store");
-    expect(page.headers.get("content-security-policy")).toContain("script-src 'nonce-");
+    expect(page.headers.get("content-security-policy")).toContain("script-src 'none'");
     expect(await page.text()).toContain("Claude");
     expect(listOAuthConsents).toHaveBeenCalledWith("u1");
 

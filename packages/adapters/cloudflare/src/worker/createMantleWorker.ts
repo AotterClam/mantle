@@ -48,7 +48,7 @@ export const MANTLE_RESERVED_PATH_PREFIXES = [
 export const MANTLE_RESERVED_WELL_KNOWN_PREFIX = "/.well-known/oauth" as const;
 
 /** Exact registrations extensions may not claim. */
-export const MANTLE_RESERVED_EXACT_PATHS = ["/favicon.ico", "*", "/*"] as const;
+export const MANTLE_RESERVED_EXACT_PATHS = ["*", "/*"] as const;
 
 type ReservedPrefix = (typeof MANTLE_RESERVED_PATH_PREFIXES)[number];
 type ReservedExact = (typeof MANTLE_RESERVED_EXACT_PATHS)[number];
@@ -144,6 +144,7 @@ export interface CreateMantleWorkerOptions<Env extends MantleCloudflareEnv> {
     env: Env,
     conventional: MantleWorkerBindings,
   ) => MantleWorkerBindings;
+  /** May rerun after initialization fails; keep external side effects out of assembly. */
   readonly extend?: (
     context: MantleWorkerBootstrapContext<Env>,
   ) => MantleWorkerExtension<Env> | void;
@@ -206,13 +207,6 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
 
     const app = new Hono<WorkerHonoEnv<Env>>();
     mountRuntimeEndpoints(app, ref);
-    app.get("/favicon.ico", async (c) => {
-      const icons = (await (await ref!.get()).siteConfig.load()).icons;
-      const icon = icons.find((candidate) => candidate.mimeType === "image/png" && !candidate.theme)
-        ?? icons.find((candidate) => !candidate.theme)
-        ?? icons[0];
-      return icon ? c.redirect(icon.src) : c.notFound();
-    });
     if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
     mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
     const mcpResource = auth.mcpResource ?? conventionalMcpResource(env);
@@ -244,6 +238,20 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     });
     assertExtensionRoutes(app, standardRouteCount, auth.basePath);
 
+    // A convention, not a reserved namespace: an existing host route wins.
+    app.get("/favicon.ico", async (c) => {
+      const icons = (await (await ref!.get()).siteConfig.load()).icons;
+      const icon = icons.find((candidate) => candidate.mimeType === "image/png" && !candidate.theme)
+        ?? icons.find((candidate) => !candidate.theme)
+        ?? icons[0];
+      if (!icon) return c.notFound();
+      const target = new URL(icon.src, c.req.url);
+      if (target.origin === new URL(c.req.url).origin && target.pathname === "/favicon.ico") {
+        return await bindings.adminAssets?.fetch(new Request(target)) ?? c.notFound();
+      }
+      return c.redirect(icon.src);
+    });
+
     const next: AssembledWorker<Env> = {
       auth,
       getRuntime,
@@ -251,12 +259,17 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
         applyCachePolicy(request, await app.fetch(request, workerEnv, ctx)),
     };
     assembled = next;
+    void auth.ready?.catch(() => {
+      if (assembled === next) assembled = null;
+    });
     return next;
   };
 
   return {
-    getRuntime(env) {
-      return assemble(env).getRuntime();
+    async getRuntime(env) {
+      const worker = assemble(env);
+      const [runtime] = await Promise.all([worker.getRuntime(), worker.auth.ready]);
+      return runtime;
     },
     async fetch(request, env, ctx) {
       return runMantleWorkerRequest(async () => {
