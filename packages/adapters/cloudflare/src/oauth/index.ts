@@ -1,5 +1,5 @@
 export {
-  mountAuthorize,
-  type MountAuthorizeOptions,
-} from "./mountOAuth.js";
+  mountMantleOAuth as mountAuthorize,
+  type MantleOAuthOptions as MountAuthorizeOptions,
+} from "@aotter/mantle-admin";
 export { applyCachePolicy } from "./cachePolicy.js";
