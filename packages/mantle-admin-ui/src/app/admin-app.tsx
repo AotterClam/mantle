@@ -5,7 +5,15 @@ import { AuthenticatedLayout } from "../layout/authenticated-layout";
 import { api, ApiError } from "../lib/api";
 import type { AdminUser } from "../lib/types";
 import { useAdminLocation } from "./router";
-import { AccessDeniedView, GateError, GateLoading, SignInView } from "../features/auth/auth-views";
+import {
+  AccessDeniedView,
+  ConnectedAppsPage,
+  ConnectedAppsView,
+  GateError,
+  GateLoading,
+  OAuthConsentView,
+  SignInView,
+} from "../features/auth/auth-views";
 import { HomeView } from "../features/console/home-view";
 import { CollectionView } from "../features/content/collection-view";
 import { EntryEditView } from "../features/content/entry-edit-view";
@@ -23,6 +31,8 @@ import { InterfaceDocsView } from "../features/logic/interface-docs-view";
 
 export function AdminApp(): React.ReactElement {
   const location = useAdminLocation();
+
+  if (location.pathname === "/oauth/consent") return <OAuthConsentView />;
 
   if (location.pathname === "/admin/sign-in") {
     return <SignInView />;
@@ -47,6 +57,7 @@ function Gate({ path }: { path: string }): React.ReactElement {
   if (is401) return <GateLoading />;
 
   if (me.isError && me.error instanceof ApiError && me.error.status === 403) {
+    if (path === "/admin/connected-apps") return <ConnectedAppsPage />;
     const body = (me.error.body ?? {}) as { login?: string | null };
     return <AccessDeniedView login={body.login ?? null} />;
   }
@@ -97,6 +108,14 @@ function Gate({ path }: { path: string }): React.ReactElement {
     return (
       <AuthenticatedLayout>
         <PreferencesView />
+      </AuthenticatedLayout>
+    );
+  }
+
+  if (path === "/admin/connected-apps") {
+    return (
+      <AuthenticatedLayout>
+        <ConnectedAppsView />
       </AuthenticatedLayout>
     );
   }

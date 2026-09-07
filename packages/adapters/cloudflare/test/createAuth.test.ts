@@ -1,4 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  getCurrentAuthContextAsyncLocalStorage,
+  getCurrentDBAdapterAsyncLocalStorage,
+  getRequestStateAsyncLocalStorage,
+} from "@better-auth/core/context";
 import { describe, expect, it, vi } from "vitest";
 import type { EmailSender } from "@aotter/mantle-runtime";
 import {
@@ -49,7 +54,7 @@ const GITHUB_METHOD_FIXTURE = {
   clientSecret: "g",
 } as const satisfies AuthMethodConfig;
 
-it("seeds Better Auth async context outside request I/O", () => {
+it("seeds the async stores actually used by Better Auth outside request I/O", async () => {
   const context = (globalThis as Record<symbol, {
     context: Record<string, unknown>;
   }>)[Symbol.for("better-auth:global")]!.context;
@@ -57,6 +62,9 @@ it("seeds Better Auth async context outside request I/O", () => {
   expect(context.requestStateAsyncStorage).toBeInstanceOf(AsyncLocalStorage);
   expect(context.endpointContextAsyncStorage).toBeInstanceOf(AsyncLocalStorage);
   expect(context.adapterAsyncStorage).toBeInstanceOf(AsyncLocalStorage);
+  expect(await getRequestStateAsyncLocalStorage()).toBe(context.requestStateAsyncStorage);
+  expect(await getCurrentAuthContextAsyncLocalStorage()).toBe(context.endpointContextAsyncStorage);
+  expect(await getCurrentDBAdapterAsyncLocalStorage()).toBe(context.adapterAsyncStorage);
 });
 
 it("keeps every Better Auth Set-Cookie header on redirects", () => {
