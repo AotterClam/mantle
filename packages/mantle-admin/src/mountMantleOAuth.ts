@@ -149,7 +149,7 @@ export async function handleMantleOAuth(
   if (request.method === "GET" && pathname === "/oauth/consents") {
     if (!auth.listOAuthConsents || !auth.revokeOAuthConsent) return null;
     const adminPage = await adminOAuthPage(request, assets);
-    if (adminPage) return adminPage;
+    if (adminPage) return redirectResponse("/admin/connected-apps", 302);
     const session = await auth.getSession(request);
     if (!session) {
       return redirectResponse("/admin/sign-in?return=%2Foauth%2Fconsents", 302);

@@ -7,9 +7,9 @@ import type { AdminUser } from "../lib/types";
 import { useAdminLocation } from "./router";
 import {
   AccessDeniedView,
+  ConnectedAppsView,
   GateError,
   GateLoading,
-  OAuthConsentsView,
   OAuthConsentView,
   SignInView,
 } from "../features/auth/auth-views";
@@ -32,7 +32,6 @@ export function AdminApp(): React.ReactElement {
   const location = useAdminLocation();
 
   if (location.pathname === "/oauth/consent") return <OAuthConsentView />;
-  if (location.pathname === "/oauth/consents") return <OAuthConsentsView />;
 
   if (location.pathname === "/admin/sign-in") {
     return <SignInView />;
@@ -107,6 +106,14 @@ function Gate({ path }: { path: string }): React.ReactElement {
     return (
       <AuthenticatedLayout>
         <PreferencesView />
+      </AuthenticatedLayout>
+    );
+  }
+
+  if (path === "/admin/connected-apps") {
+    return (
+      <AuthenticatedLayout>
+        <ConnectedAppsView />
       </AuthenticatedLayout>
     );
   }

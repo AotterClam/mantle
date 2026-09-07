@@ -20,15 +20,16 @@ const stubAuth: MantleOAuthAuth = {
 
 describe("mountMantleOAuth", () => {
   it("serves the shared Admin SPA through the runtime-neutral handler", async () => {
+    const assets = {
+      fetch: async () => new Response('<div id="root"></div>', {
+        headers: { "content-type": "text/html" },
+      }),
+    };
     const res = await handleMantleOAuth(
       new Request("https://example.test/oauth/consent?sig=signed"),
       {
         auth: stubAuth,
-        assets: {
-          fetch: async () => new Response('<div id="root"></div>', {
-            headers: { "content-type": "text/html" },
-          }),
-        },
+        assets,
       },
     );
 
@@ -37,6 +38,20 @@ describe("mountMantleOAuth", () => {
     expect(res?.headers.get("cache-control")).toBe("private, no-store");
     expect(res?.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(res?.headers.get("content-security-policy")).not.toContain("unsafe-inline");
+
+    const connected = await handleMantleOAuth(
+      new Request("https://example.test/oauth/consents"),
+      {
+        auth: {
+          ...stubAuth,
+          listOAuthConsents: async () => [],
+          revokeOAuthConsent: async () => true,
+        },
+        assets,
+      },
+    );
+    expect(connected?.status).toBe(302);
+    expect(connected?.headers.get("location")).toBe("/admin/connected-apps");
   });
 
   it("projects consent and connected apps as secret-free SPA data", async () => {
@@ -126,8 +141,10 @@ describe("mountMantleOAuth", () => {
     }, "test-nonce");
 
     expect(html).toContain('<input type="hidden" name="decision"/>');
-    expect(html).toContain('data-loading-label="授權中…"');
-    expect(html).toContain('data-loading-label="拒絕中…"');
+    expect(html).toContain('data-loading-label="連結中…"');
+    expect(html).toContain('data-loading-label="取消中…"');
+    expect(html).toContain("仍會依照你的帳號權限決定");
+    expect(html).not.toContain(">mcp<");
     expect(html).toContain('this.setAttribute("aria-busy","true")');
     expect(html).toContain('action.disabled=true');
     expect(html).toContain('<script nonce="test-nonce">');
@@ -144,7 +161,8 @@ describe("mountMantleOAuth", () => {
     expect(html).toContain("Connected apps");
     expect(html).toContain("Claude");
     expect(html).toContain('name="consent_id" value="consent-1"');
-    expect(html).toContain('data-loading-label="Revoking…"');
+    expect(html).toContain('data-loading-label="Disconnecting…"');
+    expect(html).not.toContain(">mcp<");
     expect(html).toContain('form[data-submit-lock]');
     expect(html).toContain('<script nonce="test-nonce">');
   });
