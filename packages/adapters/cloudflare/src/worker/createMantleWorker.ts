@@ -261,6 +261,7 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     async fetch(request, env, ctx) {
       return runMantleWorkerRequest(async () => {
         const worker = assemble(env);
+        if (worker.auth.ready) ctx.waitUntil(worker.auth.ready);
         const setupIncomplete = await setupIncompleteAuthResponse(request, worker.auth);
         if (setupIncomplete) return setupIncomplete;
         await worker.getRuntime();
