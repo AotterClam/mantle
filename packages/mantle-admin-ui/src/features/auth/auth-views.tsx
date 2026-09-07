@@ -1,4 +1,5 @@
 import * as React from "react";
+import type { OAuthConsentInfo, OAuthConsentRequest } from "@aotter/mantle-admin";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2Icon, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,8 @@ import { t } from "../../app/i18n";
 import { authMethodsQueryOptions } from "../../lib/queries";
 import type { AuthMethodInfo } from "../../lib/types";
 import { signOut } from "../../lib/auth";
+import { ThemeToggle } from "../../layout/preference-controls";
+import { ErrorBox, PageHeader, SectionCard } from "../../ui/page";
 
 function AuthPage({
   children,
@@ -26,7 +29,12 @@ function AuthPage({
 }): React.ReactElement {
   return (
     <main className="flex min-h-svh items-center justify-center p-6">
-      <Card className={wide ? "w-full max-w-md" : "w-full max-w-sm"}>
+      <Card
+        className={`${wide ? "w-full max-w-md" : "w-full max-w-sm"} relative [&>[data-slot=card-header]]:pe-14`}
+      >
+        <div className="absolute top-2 end-2 z-10">
+          <ThemeToggle />
+        </div>
         {children}
       </Card>
     </main>
@@ -90,6 +98,9 @@ export function AccessDeniedView({
         <p className="mb-6 text-sm text-muted-foreground">
           {t(language, "auth.accessDenied.askOwner")}
         </p>
+        <Button variant="outline" className="mb-2 w-full" asChild>
+          <a href="/admin/connected-apps">{t(language, "oauth.connectedApps")}</a>
+        </Button>
         <Button variant="outline" className="w-full" onClick={signOut}>
           <LogOut className="me-2 size-4" aria-hidden />
           {t(language, "common.signOut")}
@@ -217,6 +228,172 @@ export function SignInView(): React.ReactElement {
       </CardContent>
     </AuthPage>
   );
+}
+
+export function OAuthConsentView(): React.ReactElement {
+  const { language } = usePreferences();
+  const [submitting, setSubmitting] = React.useState<"approve" | "deny" | null>(null);
+  const decision = React.useRef<HTMLInputElement>(null);
+  const consent = useQuery<OAuthConsentRequest | null>({
+    queryKey: ["oauth-consent", window.location.search],
+    queryFn: async () => {
+      const response = await fetch(`/oauth/consent/data${window.location.search}`);
+      if (response.status === 401) return redirectToSignIn();
+      const body = await response.json() as { consent: OAuthConsentRequest | null };
+      if (response.status === 400) return null;
+      if (!response.ok) throw new Error(t(language, "common.failedToLoad"));
+      return body.consent;
+    },
+    retry: false,
+  });
+
+  if (consent.isLoading) return <GateLoading />;
+  if (consent.isError) return <GateError error={consent.error} />;
+  if (!consent.data) {
+    return (
+      <AuthPage wide>
+        <CardHeader>
+          <CardDescription>{t(language, "oauth.consent.eyebrow")}</CardDescription>
+          <CardTitle className="text-xl">
+            <h1>{t(language, "oauth.consent.invalidTitle")}</h1>
+          </CardTitle>
+          <CardDescription>{t(language, "oauth.consent.invalidBody")}</CardDescription>
+        </CardHeader>
+      </AuthPage>
+    );
+  }
+
+  return (
+    <AuthPage wide>
+      <CardHeader>
+        <CardDescription>{t(language, "oauth.consent.eyebrow")}</CardDescription>
+        <CardTitle className="text-xl">
+          <h1>{t(language, "oauth.consent.heading", { client: consent.data.clientName })}</h1>
+        </CardTitle>
+        <CardDescription>{t(language, "oauth.consent.body", { client: consent.data.clientName })}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          method="post"
+          action="/oauth/consent"
+          className="flex gap-2 max-sm:flex-col"
+          aria-busy={submitting !== null || undefined}
+          onSubmit={(event) => {
+            const submitter = event.nativeEvent.submitter as HTMLButtonElement | null;
+            if (submitter?.value !== "approve" && submitter?.value !== "deny") return;
+            if (decision.current) decision.current.value = submitter.value;
+            setSubmitting(submitter.value);
+          }}
+        >
+          <input type="hidden" name="oauth_query" value={consent.data.oauthQuery} />
+          <input ref={decision} type="hidden" name="decision" />
+          <SignInButton
+            type="submit"
+            value="approve"
+            className="flex-1"
+            busy={submitting === "approve"}
+            disabled={submitting !== null}
+          >
+            {t(language, "oauth.consent.approve")}
+          </SignInButton>
+          <SignInButton
+            type="submit"
+            value="deny"
+            variant="secondary"
+            className="flex-1"
+            busy={submitting === "deny"}
+            disabled={submitting !== null}
+          >
+            {t(language, "oauth.consent.deny")}
+          </SignInButton>
+        </form>
+      </CardContent>
+    </AuthPage>
+  );
+}
+
+/** Members can manage their own grants without access to staff Admin APIs. */
+export function ConnectedAppsPage(): React.ReactElement {
+  return (
+    <AuthPage wide>
+      <CardContent className="pt-6">
+        <ConnectedAppsView />
+      </CardContent>
+    </AuthPage>
+  );
+}
+
+export function ConnectedAppsView(): React.ReactElement {
+  const { language } = usePreferences();
+  const [submitting, setSubmitting] = React.useState<string | null>(null);
+  const consents = useQuery<readonly OAuthConsentInfo[]>({
+    queryKey: ["oauth-consents"],
+    queryFn: async () => {
+      const response = await fetch("/oauth/consents/data");
+      if (response.status === 401) return redirectToSignIn();
+      if (!response.ok) throw new Error(t(language, "common.failedToLoad"));
+      return ((await response.json()) as { consents: readonly OAuthConsentInfo[] }).consents;
+    },
+    retry: false,
+  });
+
+  return (
+    <div className="mx-auto max-w-4xl">
+      <PageHeader
+        eyebrow={t(language, "oauth.apps.eyebrow")}
+        title={t(language, "oauth.connectedApps")}
+        description={t(language, "oauth.apps.body")}
+      />
+      {consents.isError ? <ErrorBox error={consents.error} /> : (
+        <SectionCard>
+          {consents.isLoading ? (
+            <div className="space-y-3" aria-busy="true">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : consents.data?.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t(language, "oauth.apps.empty")}</p>
+          ) : (
+            <div className="divide-y">
+              {consents.data?.map((consent) => (
+                <section key={consent.id} className="flex flex-wrap items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <h2 className="font-medium">{consent.clientName}</h2>
+                    <code className="mt-1 block break-all text-xs text-muted-foreground">
+                      {consent.clientId}
+                    </code>
+                  </div>
+                  <form
+                    method="post"
+                    action="/oauth/consents/revoke"
+                    onSubmit={() => setSubmitting(consent.id)}
+                  >
+                    <input type="hidden" name="consent_id" value={consent.id} />
+                    <SignInButton
+                      type="submit"
+                      variant="destructive"
+                      busy={submitting === consent.id}
+                      disabled={submitting !== null}
+                    >
+                      {t(language, "oauth.apps.revoke")}
+                    </SignInButton>
+                  </form>
+                </section>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
+function redirectToSignIn(): never {
+  const current = `${window.location.pathname}${window.location.search}`;
+  const params = new URLSearchParams(window.location.search);
+  params.set("return", current);
+  window.location.replace(`/admin/sign-in?${params}`);
+  throw new Error("Redirecting to sign in");
 }
 
 function MethodSection({

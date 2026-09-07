@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
+import { ChevronsUpDown, LogOut, Settings, Unplug } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -14,7 +14,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import { usePreferences } from "@/app/preferences";
 import { t } from "@/app/i18n";
@@ -28,7 +27,6 @@ export interface NavUserProps {
 }
 
 export function NavUser({ login, image, role }: NavUserProps): React.ReactElement {
-  const { isMobile } = useSidebar();
   const { language } = usePreferences();
   const initials = initialsFor(login);
 
@@ -49,8 +47,8 @@ export function NavUser({ login, image, role }: NavUserProps): React.ReactElemen
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
-            align="end"
-            side={isMobile ? "bottom" : "right"}
+            align="start"
+            side="top"
             sideOffset={4}
             className="w-(--radix-dropdown-menu-trigger-width) min-w-56"
           >
@@ -68,6 +66,12 @@ export function NavUser({ login, image, role }: NavUserProps): React.ReactElemen
               <a href="/admin/preferences">
                 <Settings aria-hidden />
                 {t(language, "preferences.page.open")}
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <a href="/admin/connected-apps">
+                <Unplug aria-hidden />
+                {t(language, "oauth.connectedApps")}
               </a>
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => signOut()}>

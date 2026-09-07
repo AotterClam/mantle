@@ -5,7 +5,7 @@ import {
 import { DPOP_SIGNING_ALGORITHMS } from "better-auth/oauth2";
 import type { MantleRuntimeRef } from "./bootRuntimeOnce.js";
 import { contextForVerifiedUser } from "./resolveCaller.js";
-import { rejectCrossOriginMutation } from "../auth/rejectCrossOriginMutation.js";
+import { rejectCrossOriginMutation } from "@aotter/mantle-admin";
 
 export interface CreateMcpApiHandlerOptions {
   readonly ref: MantleRuntimeRef;
