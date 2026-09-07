@@ -10,6 +10,7 @@ import type {
 } from "@aotter/mantle-runtime";
 import type { PublicPathResolver, TemplateRegistry } from "@aotter/mantle-web";
 import type { SiteDefaults } from "@aotter/mantle-spec";
+import { mountMantleOAuth } from "@aotter/mantle-admin";
 import {
   conventionalMcpResource,
   createConventionalAuth,
@@ -31,7 +32,6 @@ import { createMcpApiHandler } from "../mount/mountMcp.js";
 import { mountAdmin } from "../mount/mountAdmin.js";
 import { mountRuntimeEndpoints } from "../mount/mountRuntimeEndpoints.js";
 import type { ConsumerCredentialResolver } from "../mount/resolveCaller.js";
-import { mountAuthorize } from "../oauth/mountOAuth.js";
 import { applyCachePolicy, PUBLIC_CACHE_TAG } from "../oauth/cachePolicy.js";
 
 /** Fixed namespaces owned by Mantle's standard Worker surfaces. */
@@ -207,7 +207,7 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     const app = new Hono<WorkerHonoEnv<Env>>();
     mountRuntimeEndpoints(app, ref);
     if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
-    mountAuthorize(app, { auth, adminAssets: bindings.adminAssets });
+    mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
     const mcpResource = auth.mcpResource ?? conventionalMcpResource(env);
     const publicMcp = createMcpApiHandler<Env>({
       ref,

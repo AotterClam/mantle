@@ -1,10 +1,6 @@
-/**
- * OAuth consent UI renderer. Self-contained HTML — no external assets,
- * no framework and no Admin UI dependency.
- * Supports zh-TW and en locales.
- */
+/** Minimal functional OAuth fallback for deployments without Admin assets. */
 
-import type { OAuthConsentInfo } from "../auth/createAuth.js";
+import type { OAuthConsentInfo } from "./mountMantleOAuth.js";
 
 export interface ConsentModel {
   readonly clientName: string;
@@ -14,7 +10,7 @@ export interface ConsentModel {
 }
 
 /** Detect consent UI locale from Accept-Language header. */
-export function detectConsentLocale(acceptLanguage: string | null): "zh-TW" | "en" {
+export function detectOAuthFallbackLocale(acceptLanguage: string | null): "zh-TW" | "en" {
   if (!acceptLanguage) return "en";
   const lower = acceptLanguage.toLowerCase();
   if (lower.includes("zh-tw") || lower.includes("zh_tw")) return "zh-TW";
@@ -113,7 +109,7 @@ function submitScript(nonce: string): string {
   return `<script nonce="${escapeHtml(nonce)}">for(const form of document.querySelectorAll("form[data-submit-lock]"))form.addEventListener("submit",function(event){const button=event.submitter;if(!button)return;const decision=this.elements.namedItem("decision");if(decision)decision.value=button.value;this.setAttribute("aria-busy","true");button.dataset.loading="true";button.textContent=button.dataset.loadingLabel;for(const action of this.querySelectorAll("button"))action.disabled=true;});</script>`;
 }
 
-export function renderConsentHtml(
+export function renderConsentFallbackHtml(
   locale: "zh-TW" | "en",
   model: ConsentModel | null,
   nonce: string,
@@ -149,7 +145,7 @@ export function renderConsentHtml(
   );
 }
 
-export function renderConnectedAppsHtml(
+export function renderConnectedAppsFallbackHtml(
   locale: "zh-TW" | "en",
   consents: readonly OAuthConsentInfo[],
   nonce: string,

@@ -20,7 +20,12 @@ import { splitSetCookieHeader } from "better-auth/cookies";
 import { oauthProvider, type Scope } from "@better-auth/oauth-provider";
 import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
-import { decodeMemberCursor, encodeMemberCursor } from "@aotter/mantle-admin";
+import {
+  decodeMemberCursor,
+  encodeMemberCursor,
+  type OAuthConsentInfo,
+  type OAuthConsentRequest,
+} from "@aotter/mantle-admin";
 import type { EmailSender } from "@aotter/mantle-runtime";
 import { STAFF_ROLES, type StaffRole } from "@aotter/mantle-spec";
 
@@ -48,6 +53,7 @@ interface BetterAuthGlobal {
 }
 
 export { decodeMemberCursor, encodeMemberCursor };
+export type { OAuthConsentInfo, OAuthConsentRequest } from "@aotter/mantle-admin";
 export { STAFF_ROLES, type StaffRole };
 /**
  * Set lookup for "is this role string a staff role?" — handlers/MCP
@@ -1087,22 +1093,6 @@ export type OAuthAccessTokenVerification =
         | "insufficient-scope";
       readonly missingScopes?: readonly string[];
     };
-
-export interface OAuthConsentRequest {
-  readonly clientName: string;
-  readonly redirectUri: string;
-  readonly scopes: readonly string[];
-  /** Better Auth-signed authorization query. Return it unchanged with the
-   *  consent decision so Better Auth can verify the flow. */
-  readonly oauthQuery: string;
-}
-
-export interface OAuthConsentInfo {
-  readonly id: string;
-  readonly clientId: string;
-  readonly clientName: string;
-  readonly scopes: readonly string[];
-}
 
 // Better Auth's full inferred type pulls plugin internals
 // (`AdminOptions`) that aren't re-exported, so emitting a .d.ts that
