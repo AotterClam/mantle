@@ -1,7 +1,6 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Loader2Icon, LogOut } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Loader2Icon, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +17,7 @@ import { authMethodsQueryOptions } from "../../lib/queries";
 import type { AuthMethodInfo } from "../../lib/types";
 import { signOut } from "../../lib/auth";
 import { ThemeToggle } from "../../layout/preference-controls";
+import { ErrorBox, PageHeader, SectionCard } from "../../ui/page";
 
 function AuthPage({
   children,
@@ -280,26 +280,9 @@ export function OAuthConsentView(): React.ReactElement {
         <CardTitle className="text-xl">
           <h1>{t(language, "oauth.consent.heading", { client: consent.data.clientName })}</h1>
         </CardTitle>
-        <CardDescription>
-          {t(language, "oauth.consent.redirect")} {" "}
-          <code className="break-all rounded bg-muted px-1 py-0.5 text-xs text-foreground">
-            {consent.data.redirectUri}
-          </code>
-        </CardDescription>
+        <CardDescription>{t(language, "oauth.consent.body", { client: consent.data.clientName })}</CardDescription>
       </CardHeader>
       <CardContent>
-        {consent.data.scopes.length > 0 ? (
-          <div className="mb-6">
-            <p className="mb-2 text-xs font-medium text-muted-foreground">
-              {t(language, "oauth.consent.scopes")}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {consent.data.scopes.map((scope) => (
-                <Badge key={scope} variant="secondary" className="font-mono">{scope}</Badge>
-              ))}
-            </div>
-          </div>
-        ) : null}
         <form
           method="post"
           action="/oauth/consent"
@@ -339,7 +322,7 @@ export function OAuthConsentView(): React.ReactElement {
   );
 }
 
-export function OAuthConsentsView(): React.ReactElement {
+export function ConnectedAppsView(): React.ReactElement {
   const { language } = usePreferences();
   const [submitting, setSubmitting] = React.useState<string | null>(null);
   const consents = useQuery<readonly OAuthConsentInfo[]>({
@@ -353,61 +336,54 @@ export function OAuthConsentsView(): React.ReactElement {
     retry: false,
   });
 
-  if (consents.isLoading) return <GateLoading />;
-  if (consents.isError) return <GateError error={consents.error} />;
-
   return (
-    <AuthPage wide>
-      <CardHeader>
-        <CardDescription>{t(language, "oauth.apps.eyebrow")}</CardDescription>
-        <CardTitle className="text-xl">
-          <h1>{t(language, "oauth.connectedApps")}</h1>
-        </CardTitle>
-        <CardDescription>{t(language, "oauth.apps.body")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {consents.data?.length === 0 ? (
-          <p className="mb-5 text-sm text-muted-foreground">{t(language, "oauth.apps.empty")}</p>
-        ) : (
-          <div className="mb-5 space-y-3">
-            {consents.data?.map((consent) => (
-              <section key={consent.id} className="rounded-lg border p-3">
-                <h2 className="font-medium">{consent.clientName}</h2>
-                <code className="mt-1 block break-all text-xs text-muted-foreground">
-                  {consent.clientId}
-                </code>
-                {consent.scopes.length > 0 ? (
-                  <div className="my-3 flex flex-wrap gap-1.5">
-                    {consent.scopes.map((scope) => (
-                      <Badge key={scope} variant="secondary" className="font-mono">{scope}</Badge>
-                    ))}
+    <div className="mx-auto max-w-4xl">
+      <PageHeader
+        eyebrow={t(language, "oauth.apps.eyebrow")}
+        title={t(language, "oauth.connectedApps")}
+        description={t(language, "oauth.apps.body")}
+      />
+      {consents.isError ? <ErrorBox error={consents.error} /> : (
+        <SectionCard>
+          {consents.isLoading ? (
+            <div className="space-y-3" aria-busy="true">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ) : consents.data?.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t(language, "oauth.apps.empty")}</p>
+          ) : (
+            <div className="divide-y">
+              {consents.data?.map((consent) => (
+                <section key={consent.id} className="flex flex-wrap items-center justify-between gap-4 py-4 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <h2 className="font-medium">{consent.clientName}</h2>
+                    <code className="mt-1 block break-all text-xs text-muted-foreground">
+                      {consent.clientId}
+                    </code>
                   </div>
-                ) : null}
-                <form
-                  method="post"
-                  action="/oauth/consents/revoke"
-                  className="mt-3 flex justify-end"
-                  onSubmit={() => setSubmitting(consent.id)}
-                >
-                  <input type="hidden" name="consent_id" value={consent.id} />
-                  <SignInButton
-                    type="submit"
-                    variant="destructive"
-                    busy={submitting === consent.id}
-                    disabled={submitting !== null}
+                  <form
+                    method="post"
+                    action="/oauth/consents/revoke"
+                    onSubmit={() => setSubmitting(consent.id)}
                   >
-                    {t(language, "oauth.apps.revoke")}
-                  </SignInButton>
-                </form>
-              </section>
-            ))}
-          </div>
-        )}
-        <Button asChild variant="link" className="px-0">
-          <a href="/admin"><ArrowLeft aria-hidden />{t(language, "oauth.apps.back")}</a>
-        </Button>
-      </CardContent>
-    </AuthPage>
+                    <input type="hidden" name="consent_id" value={consent.id} />
+                    <SignInButton
+                      type="submit"
+                      variant="destructive"
+                      busy={submitting === consent.id}
+                      disabled={submitting !== null}
+                    >
+                      {t(language, "oauth.apps.revoke")}
+                    </SignInButton>
+                  </form>
+                </section>
+              ))}
+            </div>
+          )}
+        </SectionCard>
+      )}
+    </div>
   );
 }
 

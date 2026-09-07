@@ -20,44 +20,42 @@ export function detectOAuthFallbackLocale(acceptLanguage: string | null): "zh-TW
 const STRINGS = {
   en: {
     title: "Authorize · mantle",
-    eyebrow: "Authorize MCP access",
-    heading: (client: string) => `Allow ${client} to access your CMS?`,
-    redirectLabel: "Will redirect to",
-    scopesLabel: "Requested scopes",
-    approve: "Approve",
-    approving: "Approving…",
-    deny: "Deny",
-    denying: "Denying…",
+    eyebrow: "Connect an app",
+    heading: (client: string) => `Connect ${client}?`,
+    body: (client: string) => `${client} will be able to use this site's management tools. What it can view or change is still limited by your account permissions.`,
+    approve: "Connect",
+    approving: "Connecting…",
+    deny: "Cancel",
+    denying: "Cancelling…",
     invalidTitle: "Invalid authorization request",
     invalidBody: "Missing or malformed consent payload. Return to your MCP client and try again.",
     appsTitle: "Connected apps · mantle",
-    appsEyebrow: "OAuth access",
+    appsEyebrow: "Your account",
     appsHeading: "Connected apps",
-    appsBody: "Apps you authorized to access this site.",
+    appsBody: "These AI assistants and apps can use the site's management tools. Every action is still checked against your current account permissions.",
     appsEmpty: "No connected apps.",
-    revoke: "Revoke access",
-    revoking: "Revoking…",
+    revoke: "Disconnect",
+    revoking: "Disconnecting…",
     back: "Back to admin",
   },
   "zh-TW": {
     title: "授權 · mantle",
-    eyebrow: "授權 MCP 存取",
-    heading: (client: string) => `允許 ${client} 存取您的 CMS？`,
-    redirectLabel: "將重新導向至",
-    scopesLabel: "請求的授權範圍",
-    approve: "同意",
-    approving: "授權中…",
-    deny: "拒絕",
-    denying: "拒絕中…",
+    eyebrow: "連結應用程式",
+    heading: (client: string) => `要連結 ${client} 嗎？`,
+    body: (client: string) => `${client} 將能使用這個網站提供的管理工具；它能查看或變更哪些內容，仍會依照你的帳號權限決定。`,
+    approve: "連結",
+    approving: "連結中…",
+    deny: "取消",
+    denying: "取消中…",
     invalidTitle: "無效的授權請求",
     invalidBody: "缺少或格式錯誤的授權資訊，請返回 MCP 客戶端重試。",
     appsTitle: "已連結應用程式 · mantle",
-    appsEyebrow: "OAuth 存取權",
+    appsEyebrow: "你的帳號",
     appsHeading: "已連結應用程式",
-    appsBody: "您已授權存取此站台的應用程式。",
+    appsBody: "這些 AI 助手或應用程式可以使用網站提供的管理工具；每次操作仍會依照你當下的帳號權限檢查。",
     appsEmpty: "目前沒有已連結的應用程式。",
-    revoke: "撤銷存取權",
-    revoking: "撤銷中…",
+    revoke: "中斷連線",
+    revoking: "中斷中…",
     back: "返回管理後台",
   },
 } as const;
@@ -81,8 +79,6 @@ const CSS = `
   p{margin:0 0 1rem;font-size:.95rem;line-height:1.55}
   .muted{color:var(--muted-foreground);font-size:.875rem}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.8rem;padding:.125rem .4rem;border-radius:.25rem;background:var(--muted);overflow-wrap:anywhere}
-  .scopes{margin:0 0 1.5rem;display:flex;flex-wrap:wrap;gap:.375rem}
-  .scope{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.75rem;padding:.25rem .5rem;border-radius:.25rem;background:var(--muted)}
   .actions{display:flex;gap:.75rem}
   button{flex:1;display:flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1rem;border:0;border-radius:.5rem;font:inherit;font-weight:500;cursor:pointer;transition:opacity .15s,background .15s}
   button:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
@@ -95,7 +91,6 @@ const CSS = `
   .apps{display:grid;gap:.75rem;margin:1.5rem 0}
   .app{padding:1rem;border:1px solid var(--border);border-radius:.5rem}
   .app h2{font-size:1rem;margin:0 0 .25rem}
-  .app .scopes{margin:.75rem 0}
   .app form{display:flex;justify-content:flex-end}
   .app button{flex:0 0 auto;background:var(--secondary);color:var(--secondary-foreground)}
   .app button:not(:disabled):hover{background:var(--accent)}
@@ -123,17 +118,11 @@ export function renderConsentFallbackHtml(
     return `${head}<p class="eyebrow">${t.eyebrow}</p><h1>${t.invalidTitle}</h1><p class="muted">${t.invalidBody}</p>${tail}`;
   }
 
-  const scopesBlock =
-    model.scopes.length > 0
-      ? `<p class="eyebrow">${t.scopesLabel}</p><div class="scopes">${model.scopes.map((s) => `<span class="scope">${escapeHtml(s)}</span>`).join("")}</div>`
-      : "";
-
   return (
     `${head}` +
     `<p class="eyebrow">${t.eyebrow}</p>` +
     `<h1>${t.heading(escapeHtml(model.clientName))}</h1>` +
-    `<p class="muted">${t.redirectLabel} <code>${escapeHtml(model.redirectUri)}</code></p>` +
-    `${scopesBlock}` +
+    `<p class="muted">${t.body(escapeHtml(model.clientName))}</p>` +
     `<form class="actions" method="post" action="/oauth/consent" data-submit-lock>` +
     `<input type="hidden" name="oauth_query" value="${escapeHtml(model.oauthQuery)}"/>` +
     `<input type="hidden" name="decision"/>` +
@@ -157,9 +146,6 @@ export function renderConnectedAppsFallbackHtml(
     : `<div class="apps">${consents.map((consent) => (
         `<section class="app"><h2>${escapeHtml(consent.clientName)}</h2>` +
         `<code>${escapeHtml(consent.clientId)}</code>` +
-        (consent.scopes.length === 0
-          ? ""
-          : `<div class="scopes">${consent.scopes.map((scope) => `<span class="scope">${escapeHtml(scope)}</span>`).join("")}</div>`) +
         `<form method="post" action="/oauth/consents/revoke" data-submit-lock>` +
         `<input type="hidden" name="consent_id" value="${escapeHtml(consent.id)}"/>` +
         `<button type="submit" data-loading-label="${t.revoking}">${t.revoke}</button>` +
