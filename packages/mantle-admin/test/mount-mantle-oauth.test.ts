@@ -169,7 +169,7 @@ describe("mountMantleOAuth", () => {
       scopes: ["mcp"],
     }]);
 
-    expect(html).toContain("Connected apps");
+    expect(html).toContain("MCP connections");
     expect(html).toContain("Claude");
     expect(html).toContain('name="consent_id" value="consent-1"');
     expect(html).toContain('action="/oauth/consents/revoke"');

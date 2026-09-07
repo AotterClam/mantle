@@ -53,7 +53,7 @@ export function AppSidebar({
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {groups.map((group, idx) => (
+        {groups.filter((group) => group.items.length > 0).map((group, idx) => (
           <NavGroup
             key={group.title ?? `g-${idx}`}
             group={group}
