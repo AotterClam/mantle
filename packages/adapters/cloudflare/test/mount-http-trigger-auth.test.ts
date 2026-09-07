@@ -9,7 +9,7 @@ import {
 import { createMantleRuntimeRef } from "../src/mount/bootRuntimeOnce.js";
 import { mountTestEndpoints } from "./mountTestEndpoints.js";
 import type { Auth } from "../src/auth/createAuth.js";
-import { rejectCrossOriginMutation } from "../src/auth/rejectCrossOriginMutation.js";
+import { rejectCrossOriginMutation } from "@aotter/mantle-admin";
 import { InMemoryDatabase } from "../../../mantle-runtime/test/fakes/database.js";
 import {
   StubAssetServer,
