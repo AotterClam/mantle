@@ -143,7 +143,7 @@ export function ThemeToggle(): React.ReactElement {
       aria-label={label}
       title={label}
     >
-      {dark ? <Sun aria-hidden /> : <Moon aria-hidden />}
+      {dark ? <Moon aria-hidden /> : <Sun aria-hidden />}
     </Button>
   );
 }
