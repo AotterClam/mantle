@@ -131,6 +131,18 @@ remaining authoritative indefinitely.
 bindings may instead set `mcpCatalogKv: { namespace, scope }`; the scope must be
 a stable deployment-owned identifier and must never be derived from a request.
 
+The shared SQLite storage accepts a `decorateSiteConfigRepository` hook; KV
+serialization and consistency policy belong to this Cloudflare decorator, not
+the runtime. Other adapters can decorate their repositories with their own
+cache implementation. Ordinary site-config, locale, and upload-policy reads
+still delegate to canonical storage; only MCP discovery uses the snapshot.
+
+Direct SQL edits bypass publication. After an out-of-band edit, call the
+decorated repository's `seed(undefined)` to republish persisted state, or allow
+the snapshot's one-hour repair deadline to trigger a reload on the next MCP
+request. Publication failure leaves D1 authoritative and does not suppress the
+public-cache purge.
+
 ## HTTP Dispatch Benchmark
 
 Run the warm, in-process View and Procedure transport benchmark with:

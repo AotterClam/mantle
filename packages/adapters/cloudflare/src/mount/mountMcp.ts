@@ -6,7 +6,6 @@ import { DPOP_SIGNING_ALGORITHMS } from "better-auth/oauth2";
 import type { MantleRuntimeRef } from "./bootRuntimeOnce.js";
 import { contextForVerifiedUser } from "./resolveCaller.js";
 import { rejectCrossOriginMutation } from "@aotter/mantle-admin";
-import { projectMcpCatalogSiteConfig } from "../bindings/KvSiteConfigRepository.js";
 
 export interface CreateMcpApiHandlerOptions {
   readonly ref: MantleRuntimeRef;
@@ -82,12 +81,12 @@ export function createMcpApiHandler<Env = Record<string, unknown>>(
       // MCP catalog without a redeploy/runtime reset.
       const site = ref.mcpCatalogSiteConfig
         ? await ref.mcpCatalogSiteConfig.loadCatalogSite(runtime)
-        : projectMcpCatalogSiteConfig(await runtime.siteConfig.load());
+        : await runtime.siteConfig.load();
       const mediaPurposes = runtime.media ? site.media.purposes : [];
       // Serialise the whole policy set as the cache key — name + required
       // mimes + per-mime maxBytes all participate. Operator edits to any
-      // of these (admin Settings → media taxonomy) rebuild the dispatcher
-      // so tools/list reflects the latest contract without a redeploy.
+      // of these rebuild the dispatcher when the discovery snapshot changes.
+      // Upload authorization still reads the canonical policy on every call.
       const publicUrl = URL.canParse(site.origin) ? site.origin : new URL(request.url).origin;
       const iconBase = `${publicUrl}/`;
       const serverInfo = {

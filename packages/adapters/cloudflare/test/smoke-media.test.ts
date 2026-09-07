@@ -360,9 +360,14 @@ describe("smoke: /admin/api/media/uploads", () => {
 });
 
 describe("smoke: MCP media tool catalog", () => {
-  it("refreshes create_media_upload purpose enum when site_config changes", async () => {
+  it.each([false, true])("refreshes media discovery without caching upload authorization (KV=%s)", async (useKv) => {
     const db = new InMemoryDatabase();
     const storage = new FakeMediaStorage();
+    const values = new Map<string, string>();
+    const namespace = {
+      get: async (key: string) => values.get(key) ?? null,
+      put: async (key: string, value: string) => { values.set(key, value); },
+    } as unknown as KVNamespace;
     const initialPolicies: MediaPurposePolicy[] = [postCoverPolicy()];
     const ref = createMantleRuntimeRef({
       plan: compileTestPlan(manifests()),
@@ -371,6 +376,7 @@ describe("smoke: MCP media tool catalog", () => {
         db,
         adminAssets: new StubAssetServer(),
         mediaStorage: storage,
+        ...(useKv ? { mcpCatalogKv: { namespace, scope: "media-test" } } : {}),
       },
       auth: staffAuth(),
     });
@@ -415,6 +421,29 @@ describe("smoke: MCP media tool catalog", () => {
       },
     };
     db.siteConfig.set("mediaPurposes", JSON.stringify([updated]));
+
+    if (useKv) {
+      // Simulate an out-of-band D1 edit while discovery still has the old policy.
+      const stale = await handler.fetch!(jsonRpcReq("tools/list"), {}, props as unknown as ExecutionContext);
+      expect(JSON.stringify(await stale.json())).toContain("post-cover");
+      const upload = await handler.fetch!(jsonRpcReq("tools/call", {
+        name: "create_media_upload",
+        arguments: {
+          purpose: "post-cover",
+          filename: "cover.jpg",
+          variants: [
+            { mimeType: "image/avif", byteSize: 100, role: "alternate" },
+            { mimeType: "image/webp", byteSize: 100, role: "alternate" },
+            { mimeType: "image/jpeg", byteSize: 100, role: "primary" },
+          ],
+        },
+      }), {}, props as unknown as ExecutionContext);
+      expect(JSON.stringify(await upload.json())).toContain("MEDIA_PURPOSE_REJECTED");
+      expect(storage.createCalls).toHaveLength(0);
+
+      // An ordinary settings write republishes actual persisted state, not defaults.
+      await (await ref.get()).updateSiteSettings.execute({ brand: "Updated site" });
+    }
 
     const second = await handler.fetch!(
       jsonRpcReq("tools/list"),

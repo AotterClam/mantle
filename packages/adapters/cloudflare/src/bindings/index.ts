@@ -12,7 +12,6 @@ export {
 export { R2MediaStorage } from "./R2MediaStorage.js";
 export {
   KvSiteConfigRepository,
-  projectMcpCatalogSiteConfig,
   type McpCatalogKvBinding,
   type McpCatalogSiteConfig,
   type McpCatalogSiteConfigReader,

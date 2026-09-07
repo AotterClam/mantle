@@ -9,6 +9,7 @@ import type {
   SiteConfigRepository,
   UpdateEditableSiteConfigArgs,
 } from "@aotter/mantle-runtime";
+import { z } from "zod";
 
 const SNAPSHOT_VERSION = 1;
 const MAX_SNAPSHOT_AGE_MS = 3_600_000;
@@ -41,6 +42,32 @@ interface CatalogSnapshotV1 {
   readonly contentHash: string;
   readonly site: McpCatalogSiteConfig;
 }
+
+const snapshotSchema = z.strictObject({
+  version: z.literal(SNAPSHOT_VERSION),
+  scope: z.string(),
+  observedAt: z.number().int().nonnegative(),
+  repairAfter: z.number().int().nonnegative(),
+  contentHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  site: z.strictObject({
+    origin: z.string(),
+    brand: z.string(),
+    description: z.string(),
+    icons: z.array(z.strictObject({
+      src: z.string(),
+      mimeType: z.enum(["image/png", "image/jpeg", "image/svg+xml", "image/webp"]).optional(),
+      sizes: z.array(z.string()).optional(),
+      theme: z.enum(["light", "dark"]).optional(),
+    })),
+    media: z.strictObject({
+      purposes: z.array(z.strictObject({
+        name: z.string(),
+        required: z.array(z.string()),
+        maxBytes: z.record(z.string(), z.number().positive()),
+      })),
+    }),
+  }),
+});
 
 interface InFlightCatalogLoad {
   readonly generation: number;
@@ -88,6 +115,9 @@ export class KvSiteConfigRepository
   }
 
   async seed(defaults: SiteDefaults | undefined): Promise<void> {
+    // Invalidate pre-mutation reads now, and reads started during the write
+    // again after commit. Neither may repopulate the local snapshot later.
+    this.generation += 1;
     await this.exclusive(async () => {
       await this.canonical.seed(defaults);
       this.generation += 1;
@@ -99,6 +129,7 @@ export class KvSiteConfigRepository
     if (!this.canonical.updateEditable) {
       throw new Error("SiteConfigRepository.updateEditable is unavailable");
     }
+    this.generation += 1;
     await this.exclusive(async () => {
       await this.canonical.updateEditable!(values);
       this.generation += 1;
@@ -161,7 +192,7 @@ export class KvSiteConfigRepository
     // Anchor freshness before the canonical read. A delayed load cannot gain
     // a fresh lifetime merely because serialization or KV put completed later.
     const observedAt = Date.now();
-    const site = normalizeCatalogSite(projectCatalogSite(await this.canonical.load()));
+    const site = normalizeCatalogSite(await this.canonical.load());
     return {
       version: SNAPSHOT_VERSION,
       scope: this.binding.scope,
@@ -174,7 +205,9 @@ export class KvSiteConfigRepository
 
   private async putSnapshot(snapshot: CatalogSnapshotV1, force = false): Promise<void> {
     const now = Date.now();
-    if (snapshot.repairAfter <= now || now < this.putBackoffUntil) return;
+    // KV requires at least 60 seconds of remaining lifetime. Do not extend
+    // an old observation just to satisfy the platform's expiration minimum.
+    if (snapshot.repairAfter < now + 60_000 || now < this.putBackoffUntil) return;
     if (
       !force
       && this.lastKnownSnapshot?.contentHash === snapshot.contentHash
@@ -227,20 +260,6 @@ export class KvSiteConfigRepository
   }
 }
 
-export function projectMcpCatalogSiteConfig(site: SiteConfig): McpCatalogSiteConfig {
-  return normalizeCatalogSite(projectCatalogSite(site));
-}
-
-function projectCatalogSite(site: SiteConfig): McpCatalogSiteConfig {
-  return {
-    origin: site.origin,
-    brand: site.brand,
-    description: site.description,
-    icons: site.icons,
-    media: site.media,
-  };
-}
-
 function normalizeCatalogSite(site: McpCatalogSiteConfig): McpCatalogSiteConfig {
   return {
     origin: site.origin,
@@ -252,7 +271,7 @@ function normalizeCatalogSite(site: McpCatalogSiteConfig): McpCatalogSiteConfig 
         name: purpose.name,
         required: [...purpose.required],
         maxBytes: Object.fromEntries(
-          Object.entries(purpose.maxBytes).sort(([left], [right]) => left.localeCompare(right)),
+          Object.entries(purpose.maxBytes).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
         ),
       })),
     },
@@ -274,43 +293,19 @@ async function parseSnapshot(
   now: number,
 ): Promise<CatalogSnapshotV1 | null> {
   if (utf8Bytes(raw) > MAX_ENVELOPE_BYTES) return null;
-  let value: unknown;
+  let snapshot: CatalogSnapshotV1;
   try {
-    value = JSON.parse(raw);
+    const parsed = snapshotSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    snapshot = parsed.data;
+    assertSiteDefaultsCanonical(snapshot.site);
   } catch {
     return null;
   }
-  if (!isRecord(value) || !hasExactKeys(value, [
-    "version",
-    "scope",
-    "observedAt",
-    "repairAfter",
-    "contentHash",
-    "site",
-  ])) return null;
-  if (
-    value["version"] !== SNAPSHOT_VERSION
-    || value["scope"] !== scope
-    || !isEpoch(value["observedAt"])
-    || !isEpoch(value["repairAfter"])
-    || typeof value["contentHash"] !== "string"
-    || !/^[a-f0-9]{64}$/u.test(value["contentHash"])
-  ) return null;
-  const observedAt = value["observedAt"];
-  const repairAfter = value["repairAfter"];
-  if (!isSnapshotFresh({ observedAt, repairAfter }, now)) return null;
-  const site = parseCatalogSite(value["site"]);
-  if (!site) return null;
-  const normalized = normalizeCatalogSite(site);
-  if (await contentHash(normalized) !== value["contentHash"]) return null;
-  return {
-    version: SNAPSHOT_VERSION,
-    scope,
-    observedAt,
-    repairAfter,
-    contentHash: value["contentHash"],
-    site: normalized,
-  };
+  if (snapshot.scope !== scope || !isSnapshotFresh(snapshot, now)) return null;
+  const site = normalizeCatalogSite(snapshot.site);
+  if (await contentHash(site) !== snapshot.contentHash) return null;
+  return { ...snapshot, site };
 }
 
 function isSnapshotFresh(
@@ -323,79 +318,6 @@ function isSnapshotFresh(
     && value.repairAfter > now;
 }
 
-function parseCatalogSite(value: unknown): McpCatalogSiteConfig | null {
-  if (!isRecord(value) || !hasExactKeys(value, [
-    "origin",
-    "brand",
-    "description",
-    "icons",
-    "media",
-  ])) return null;
-  if (
-    typeof value["origin"] !== "string"
-    || typeof value["brand"] !== "string"
-    || typeof value["description"] !== "string"
-    || !Array.isArray(value["icons"])
-    || !isRecord(value["media"])
-    || !hasExactKeys(value["media"], ["purposes"])
-    || !Array.isArray(value["media"]["purposes"])
-  ) return null;
-  const icons = value["icons"].map(parseIcon);
-  const purposes = value["media"]["purposes"].map(parsePurpose);
-  if (icons.some((icon) => icon === null) || purposes.some((purpose) => purpose === null)) {
-    return null;
-  }
-  const site: McpCatalogSiteConfig = {
-    origin: value["origin"],
-    brand: value["brand"],
-    description: value["description"],
-    icons: icons as SiteIcon[],
-    media: { purposes: purposes as MediaPurposePolicy[] },
-  };
-  try {
-    assertSiteDefaultsCanonical({
-      origin: site.origin,
-      brand: site.brand,
-      description: site.description,
-      icons: site.icons,
-      media: site.media,
-    });
-    return site;
-  } catch {
-    return null;
-  }
-}
-
-function parseIcon(value: unknown): SiteIcon | null {
-  if (!isRecord(value) || !hasAllowedKeys(value, ["src", "mimeType", "sizes", "theme"])) {
-    return null;
-  }
-  if (
-    typeof value["src"] !== "string"
-    || (value["mimeType"] !== undefined && typeof value["mimeType"] !== "string")
-    || (value["theme"] !== undefined && typeof value["theme"] !== "string")
-    || (value["sizes"] !== undefined && (
-      !Array.isArray(value["sizes"])
-      || !value["sizes"].every((size) => typeof size === "string")
-    ))
-  ) return null;
-  return value as unknown as SiteIcon;
-}
-
-function parsePurpose(value: unknown): MediaPurposePolicy | null {
-  if (!isRecord(value) || !hasExactKeys(value, ["name", "required", "maxBytes"])) return null;
-  if (
-    typeof value["name"] !== "string"
-    || !Array.isArray(value["required"])
-    || !value["required"].every((item) => typeof item === "string")
-    || !isRecord(value["maxBytes"])
-    || !Object.values(value["maxBytes"]).every((bytes) => (
-      typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes > 0
-    ))
-  ) return null;
-  return value as unknown as MediaPurposePolicy;
-}
-
 async function contentHash(site: McpCatalogSiteConfig): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(site)));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -405,19 +327,6 @@ function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function isEpoch(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  return Object.keys(value).length === keys.length && hasAllowedKeys(value, keys);
-}
-
-function hasAllowedKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const allowed = new Set(keys);
-  return Object.keys(value).every((key) => allowed.has(key));
 }
