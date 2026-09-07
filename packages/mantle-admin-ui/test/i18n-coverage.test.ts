@@ -15,7 +15,6 @@ const REQUIRED_TRANSLATED_KEYS = new Set([
   "common.toggleSidebar",
   "common.yes",
   "common.no",
-  "oauth.connectedApps",
   "nav.build",
   "nav.docs",
   "nav.localizedContent",
@@ -31,6 +30,7 @@ const REQUIRED_TRANSLATED_KEYS = new Set([
 
 const translatedKeys = Object.keys(STRINGS.en).filter((key) =>
   REQUIRED_TRANSLATED_KEYS.has(key)
+  || key.startsWith("oauth.")
   || key.startsWith("model.")
   || key.startsWith("logic.")
   || key.startsWith("docs.")
