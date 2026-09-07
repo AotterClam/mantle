@@ -32,6 +32,7 @@ describe("mountMantleAdmin", () => {
     expect(await response.text()).toBe("admin shell");
     expect((await app.request("https://example.test/admin/dev")).status).toBe(200);
     expect((await app.request("https://example.test/admin/dev/docs")).status).toBe(200);
+    expect((await app.request("https://example.test/admin/connected-apps")).status).toBe(200);
   });
 
   it("denies Admin APIs without a session", async () => {

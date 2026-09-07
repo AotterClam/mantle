@@ -10,6 +10,7 @@ import type {
 } from "@aotter/mantle-runtime";
 import type { PublicPathResolver, TemplateRegistry } from "@aotter/mantle-web";
 import type { SiteDefaults } from "@aotter/mantle-spec";
+import { mountMantleOAuth } from "@aotter/mantle-admin";
 import {
   conventionalMcpResource,
   createConventionalAuth,
@@ -31,7 +32,6 @@ import { createMcpApiHandler } from "../mount/mountMcp.js";
 import { mountAdmin } from "../mount/mountAdmin.js";
 import { mountRuntimeEndpoints } from "../mount/mountRuntimeEndpoints.js";
 import type { ConsumerCredentialResolver } from "../mount/resolveCaller.js";
-import { mountAuthorize } from "../oauth/mountOAuth.js";
 import { applyCachePolicy, PUBLIC_CACHE_TAG } from "../oauth/cachePolicy.js";
 
 /** Fixed namespaces owned by Mantle's standard Worker surfaces. */
@@ -144,6 +144,7 @@ export interface CreateMantleWorkerOptions<Env extends MantleCloudflareEnv> {
     env: Env,
     conventional: MantleWorkerBindings,
   ) => MantleWorkerBindings;
+  /** May rerun after initialization fails; keep external side effects out of assembly. */
   readonly extend?: (
     context: MantleWorkerBootstrapContext<Env>,
   ) => MantleWorkerExtension<Env> | void;
@@ -207,7 +208,7 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     const app = new Hono<WorkerHonoEnv<Env>>();
     mountRuntimeEndpoints(app, ref);
     if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
-    mountAuthorize(app, { auth });
+    mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
     const mcpResource = auth.mcpResource ?? conventionalMcpResource(env);
     const publicMcp = createMcpApiHandler<Env>({
       ref,
@@ -237,6 +238,20 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     });
     assertExtensionRoutes(app, standardRouteCount, auth.basePath);
 
+    // A convention, not a reserved namespace: an existing host route wins.
+    app.get("/favicon.ico", async (c) => {
+      const icons = (await (await ref!.get()).siteConfig.load()).icons;
+      const icon = icons.find((candidate) => candidate.mimeType === "image/png" && !candidate.theme)
+        ?? icons.find((candidate) => !candidate.theme)
+        ?? icons[0];
+      if (!icon) return c.notFound();
+      const target = new URL(icon.src, c.req.url);
+      if (target.origin === new URL(c.req.url).origin && target.pathname === "/favicon.ico") {
+        return await bindings.adminAssets?.fetch(new Request(target)) ?? c.notFound();
+      }
+      return c.redirect(icon.src);
+    });
+
     const next: AssembledWorker<Env> = {
       auth,
       getRuntime,
@@ -244,19 +259,25 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
         applyCachePolicy(request, await app.fetch(request, workerEnv, ctx)),
     };
     assembled = next;
+    void auth.ready?.catch(() => {
+      if (assembled === next) assembled = null;
+    });
     return next;
   };
 
   return {
-    getRuntime(env) {
-      return assemble(env).getRuntime();
+    async getRuntime(env) {
+      const worker = assemble(env);
+      const [runtime] = await Promise.all([worker.getRuntime(), worker.auth.ready]);
+      return runtime;
     },
     async fetch(request, env, ctx) {
       return runMantleWorkerRequest(async () => {
         const worker = assemble(env);
+        if (worker.auth.ready) ctx.waitUntil(worker.auth.ready);
         const setupIncomplete = await setupIncompleteAuthResponse(request, worker.auth);
         if (setupIncomplete) return setupIncomplete;
-        if (!isRuntimeIndependentOAuthRequest(request)) await worker.getRuntime();
+        await worker.getRuntime();
         return worker.fetch(request, env, ctx);
       });
     },
@@ -271,13 +292,6 @@ async function purgePublicCache(): Promise<void> {
   if (!result.success) {
     console.error("Mantle public cache purge failed", result.errors);
   }
-}
-
-function isRuntimeIndependentOAuthRequest(request: Request): boolean {
-  const pathname = new URL(request.url).pathname;
-  if (pathname.startsWith(MANTLE_RESERVED_WELL_KNOWN_PREFIX)) return true;
-  return (pathname === "/mcp" || pathname.startsWith("/mcp/")) &&
-    !request.headers.has("authorization");
 }
 
 /** Redacted fail-closed boundary for facade and low-level Worker assembly failures. */

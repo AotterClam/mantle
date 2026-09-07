@@ -9,8 +9,9 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 /**
- * Admin SPA build. `mantle generate` copies this dist into the
- * consumer's Cloudflare Static Assets directory.
+ * Admin SPA build. When `@aotter/mantle-admin-ui` is installed,
+ * `mantle generate` copies this dist into the consumer's Cloudflare
+ * Static Assets directory (`public/_mantle/admin/`).
  */
 export default defineConfig({
   base: "/_mantle/admin/",
@@ -34,7 +35,7 @@ export default defineConfig({
 });
 
 /**
- * OAuth consent HTML reuses only the small system-token stylesheet;
+ * Keep the small system-token stylesheet available to server consumers;
  * the SPA itself stays in native static files.
  */
 function serverExportsPlugin(): Plugin {

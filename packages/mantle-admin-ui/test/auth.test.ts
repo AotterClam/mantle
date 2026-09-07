@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AdminApp } from "../src/app/admin-app";
+import { AdminRouterProvider } from "../src/app/router";
+import { ApiError } from "../src/lib/api";
 import {
   safeReturnPath,
   signedOAuthQuery,
   SignInButton,
 } from "../src/features/auth/auth-views";
 import { signOut } from "../src/lib/auth";
+import { PreferencesProvider, resolveTheme } from "../src/app/preferences";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -31,6 +36,34 @@ describe("signOut", () => {
 });
 
 describe("sign-in", () => {
+  it("lets members disconnect their own apps without granting staff access", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } });
+    await client.fetchQuery({
+      queryKey: ["me"],
+      queryFn: () => Promise.reject(new ApiError("forbidden", 403, {})),
+    }).catch(() => undefined);
+    client.setQueryData(["oauth-consents"], [{ id: "grant-1", clientId: "client-1", clientName: "My agent", scopes: ["mcp"] }]);
+    const render = (pathname: string) => {
+      vi.stubGlobal("window", { location: { pathname, search: "" } });
+      return renderToStaticMarkup(createElement(QueryClientProvider, { client },
+        createElement(PreferencesProvider, null,
+          createElement(AdminRouterProvider, null, createElement(AdminApp))),
+      ));
+    };
+    expect(render("/admin/connected-apps")).toContain("My agent");
+    expect(render("/admin/connected-apps")).toContain('action="/oauth/consents/revoke"');
+    expect(render("/admin/settings")).not.toContain("My agent");
+    expect(render("/admin/settings")).toContain('href="/admin/connected-apps"');
+    client.clear();
+  });
+
+  it("uses the system theme until an explicit override exists", () => {
+    expect(resolveTheme("system", true)).toBe("dark");
+    expect(resolveTheme("system", false)).toBe("light");
+    expect(resolveTheme("light", true)).toBe("light");
+    expect(resolveTheme("dark", false)).toBe("dark");
+  });
+
   it("keeps return navigation on the same origin", () => {
     expect(safeReturnPath("/admin/c/stories?draft=1#edit")).toBe(
       "/admin/c/stories?draft=1#edit",
