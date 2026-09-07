@@ -48,29 +48,30 @@ export interface MantleOAuthOptions {
   readonly assets?: AdminAssetServer;
 }
 
-function oauthPageHeaders(nonce: string): Record<string, string> {
+function oauthFormAction(redirectUri?: string): string {
+  if (!redirectUri) return "'self'";
+  const callback = new URL(redirectUri);
+  return `'self' ${callback.origin === "null" ? callback.protocol : callback.origin}`;
+}
+
+function oauthPageHeaders(
+  nonce: string,
+  redirectUri?: string,
+): Record<string, string> {
   return {
     "cache-control": "private, no-store",
     "content-security-policy":
-      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; form-action ${oauthFormAction(redirectUri)}; frame-ancestors 'none'; base-uri 'none'`,
     "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };
 }
 
-const OAUTH_SPA_HEADERS = {
-  "cache-control": "private, no-store",
-  "content-security-policy":
-    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-  "referrer-policy": "same-origin",
-  "x-content-type-options": "nosniff",
-  "x-frame-options": "DENY",
-} as const;
-
 async function adminOAuthPage(
   request: Request,
   assets: AdminAssetServer | undefined,
+  redirectUri?: string,
 ): Promise<Response | null> {
   if (!assets) return null;
   const asset = await assets.fetch(
@@ -78,7 +79,14 @@ async function adminOAuthPage(
   );
   if (!asset) return null;
   const headers = new Headers(asset.headers);
-  for (const [name, value] of Object.entries(OAUTH_SPA_HEADERS)) headers.set(name, value);
+  headers.set("cache-control", "private, no-store");
+  headers.set(
+    "content-security-policy",
+    `default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action ${oauthFormAction(redirectUri)}; frame-ancestors 'none'; base-uri 'none'`,
+  );
+  headers.set("referrer-policy", "same-origin");
+  headers.set("x-content-type-options", "nosniff");
+  headers.set("x-frame-options", "DENY");
   return new Response(asset.body, { status: asset.status, headers });
 }
 
@@ -110,10 +118,6 @@ export async function handleMantleOAuth(
   }
 
   if (request.method === "GET" && pathname === "/oauth/consent") {
-    const adminPage = await adminOAuthPage(request, assets);
-    if (adminPage) return adminPage;
-    const locale = detectOAuthFallbackLocale(request.headers.get("accept-language"));
-    const nonce = crypto.randomUUID();
     let model: OAuthConsentRequest | null = null;
     try {
       model = await auth.getOAuthConsentRequest(request);
@@ -121,9 +125,16 @@ export async function handleMantleOAuth(
       // Invalid, expired, or unauthenticated signed queries render the same
       // non-sensitive failure page.
     }
+    const adminPage = await adminOAuthPage(request, assets, model?.redirectUri);
+    if (adminPage) return adminPage;
+    const locale = detectOAuthFallbackLocale(request.headers.get("accept-language"));
+    const nonce = crypto.randomUUID();
     return new Response(renderConsentFallbackHtml(locale, model, nonce), {
       status: model ? 200 : 400,
-      headers: { ...oauthPageHeaders(nonce), "content-type": "text/html; charset=UTF-8" },
+      headers: {
+        ...oauthPageHeaders(nonce, model?.redirectUri),
+        "content-type": "text/html; charset=UTF-8",
+      },
     });
   }
 
