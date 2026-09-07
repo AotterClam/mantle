@@ -625,3 +625,63 @@ OAuth store and is not renamed by this decision.
 This amendment adopts the 2026-07-28 CIMD authorization profile only. Updating
 Mantle's JSON-RPC dispatcher to the complete MCP 2026-07-28 transport revision
 is a separate decision.
+
+## 2026-09-07 amendment — shared OAuth surfaces and revocation
+
+OAuth product UI is not owned by a runtime adapter. `@aotter/mantle-admin`
+owns `MantleOAuthAuth`, the consent/connected-app view models, and
+`handleMantleOAuth(Request) -> Response | null`; `mountMantleOAuth` is a thin
+Hono bridge. The Cloudflare adapter implements protocol actions using the
+same Better Auth instance and D1. Future adapters reuse this contract, not
+Cloudflare-specific UI glue. The old `mountAuthorize` export remains an alias.
+
+`@aotter/mantle-admin-ui` owns the React/shadcn sign-in, consent and connected
+apps surfaces, including i18n, theme and submit state. Auth pages initially
+follow the system theme; the light/dark toggle persists an explicit override.
+Connected apps has an Admin page, but managing one's own grants requires only
+a session, never a staff role. The no-assets HTML fallback uses native forms
+without JavaScript or a second implementation of the Admin design system.
+Both mounts retain same-origin mutation checks and private/no-store responses.
+The consent document's CSP permits only the provider-validated callback
+origin for the browser's form redirect; it never trusts an unsigned query.
+
+MCP authorization remains session-bound: the JWT's original Better Auth
+session must still exist and be unexpired. Admin sign-out/session expiration
+therefore also ends that session's MCP access. A refresh token is not an
+independent authorization to bypass this check. Staff roles are still read
+fresh on every protected request.
+
+Disconnect is scoped to the authenticated user and the selected client. It
+revokes refresh/opaque access tokens, removes pending authorization codes and
+consent rows, and prevents existing JWTs from becoming valid when the client
+is connected again. The verification-create hook captures the consent row ID
+in Better Auth's existing authorization `referenceId`; Better Auth carries it
+through the authorization code and every refresh rotation. MCP JWTs copy that
+reference into `mantle_consent_id`, which must match the active consent row.
+Never look up a new consent at token mint time: doing so could revive a refresh
+lineage whose insertion raced the revoke batch. Same-second reconnect and a
+delayed old refresh row are required regression cases, not clock delays.
+
+MCP mode reserves authorization `referenceId` for this grant identity; future
+curated configuration must not also expose Better Auth's `postLogin` reference
+hooks. MCP access requires a persisted user consent, so `skipConsent` and
+`cachedTrustedClients` must not bypass consent for MCP clients.
+
+This alpha hotfix requires existing MCP clients to reconnect once: pre-hotfix
+JWTs without the grant claim are rejected immediately. No account/session reset
+is required. The unshipped watermark migration 0008 is removed; its unused
+table in the phsu development database is harmless and is not queried or
+deleted during deployment.
+
+Workers must retain initialization work through `ExecutionContext.waitUntil`
+even when the initial challenge finishes or its client disconnects. Schema
+boot precedes OAuth handling. The adapter's static AsyncLocalStorage seeding
+is a version-pinned Better Auth 1.7.2 integration, with accessor-identity
+regression coverage; it does not replace Better Auth's request context.
+Failed Auth initialization evicts only the failed Worker assembly so a later
+request can retry. Non-HTTP callers await Auth initialization with runtime boot;
+HTTP requests anchor it without making public responses depend on Auth health.
+
+The conventional `/favicon.ico` reflects the configured site icon, but is a
+fallback after consumer routes, not a newly reserved namespace. Existing
+consumer icon routes must continue to work after a package update.

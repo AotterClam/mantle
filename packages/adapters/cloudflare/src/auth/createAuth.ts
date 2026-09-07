@@ -20,14 +20,18 @@ import { splitSetCookieHeader } from "better-auth/cookies";
 import { oauthProvider, type Scope } from "@better-auth/oauth-provider";
 import { mcp } from "@better-auth/mcp";
 import { cimd } from "@better-auth/cimd";
-import { decodeMemberCursor, encodeMemberCursor } from "@aotter/mantle-admin";
+import {
+  decodeMemberCursor,
+  encodeMemberCursor,
+  type OAuthConsentInfo,
+  type OAuthConsentRequest,
+} from "@aotter/mantle-admin";
 import type { EmailSender } from "@aotter/mantle-runtime";
 import { STAFF_ROLES, type StaffRole } from "@aotter/mantle-spec";
 
-// Better Auth lazily imports AsyncLocalStorage. On Workers that promise belongs
-// to the request that first touches it; if the request is canceled, the whole
-// isolate can keep awaiting the abandoned promise. Seed its shared stores
-// synchronously so auth calls remain usable after client disconnects.
+// Better Auth 1.7.2 initializes its shared stores asynchronously. Seed them
+// before any request can be canceled; the accessor-identity regression test
+// pins this version-specific integration to the stores Better Auth uses.
 const betterAuthGlobalKey = Symbol.for("better-auth:global");
 const betterAuthGlobals = globalThis as typeof globalThis & {
   [key: symbol]: BetterAuthGlobal | undefined;
@@ -48,6 +52,7 @@ interface BetterAuthGlobal {
 }
 
 export { decodeMemberCursor, encodeMemberCursor };
+export type { OAuthConsentInfo, OAuthConsentRequest } from "@aotter/mantle-admin";
 export { STAFF_ROLES, type StaffRole };
 /**
  * Set lookup for "is this role string a staff role?" — handlers/MCP
@@ -227,6 +232,7 @@ export interface OAuthProviderConfig {
   readonly allowUnauthenticatedClientRegistration?: boolean;
   readonly clientRegistrationDefaultScopes?: ReadonlyArray<Scope>;
   readonly clientRegistrationAllowedScopes?: ReadonlyArray<Scope>;
+  /** MCP resources still require a persisted user consent; do not bypass it. */
   readonly cachedTrustedClients?: ReadonlySet<string>;
   /** Protected resources this authorization server may issue tokens for. */
   readonly resources?: ReadonlyArray<string>;
@@ -274,6 +280,7 @@ export interface RegisterOAuthClientInput {
   >;
   readonly responseTypes?: ReadonlyArray<"code">;
   readonly applicationType?: "web" | "native";
+  /** Not suitable for MCP clients: MCP access requires a persisted user consent. */
   readonly skipConsent?: boolean;
   readonly enableEndSession?: boolean;
   readonly requirePKCE?: boolean;
@@ -860,6 +867,11 @@ function buildAuth(config: CreateAuthConfig) {
             ? mcp({
                 ...providerOptions,
                 resource: config.oauthProvider.mcpResource,
+                extensions: [{
+                  claims: {
+                    accessToken: ({ referenceId }) => ({ mantle_consent_id: referenceId ?? null }),
+                  },
+                }],
               })
             : oauthProvider(providerOptions),
           ...(config.oauthProvider.mcpResource
@@ -955,7 +967,7 @@ function buildAuth(config: CreateAuthConfig) {
       );
     }
   };
-  const databaseHooks = {
+  const databaseHooks: BetterAuthOptions["databaseHooks"] = {
     user: {
       create: {
         before: async (user: Readonly<Record<string, unknown>>, context: AuthHookContext) =>
@@ -965,6 +977,30 @@ function buildAuth(config: CreateAuthConfig) {
       update: {
         before: async (user: Readonly<Record<string, unknown>>, context: AuthHookContext) =>
           guardGithubLoginProfile(user, context, config.methods),
+      },
+    },
+    verification: {
+      create: {
+        before: async (verification) => {
+          if (!config.oauthProvider?.mcpResource) return;
+          let value;
+          try {
+            value = JSON.parse(verification.value) as {
+              type?: unknown; userId?: unknown; query?: { client_id?: unknown };
+            };
+          } catch {
+            return; // OTPs and other verification values are not OAuth grants.
+          }
+          if (value?.type !== "authorization_code" || typeof value.userId !== "string" ||
+              typeof value.query?.client_id !== "string") return;
+          const consent = await config.database
+            .prepare("SELECT id FROM oauthConsent WHERE userId = ? AND clientId = ? LIMIT 1")
+            .bind(value.userId, value.query.client_id)
+            .first<{ id: string }>();
+          // Better Auth carries referenceId from this code through every
+          // refresh rotation. Never rebind an old lineage to a new consent.
+          return { data: { value: JSON.stringify({ ...value, referenceId: consent?.id ?? "" }) } };
+        },
       },
     },
   };
@@ -1088,28 +1124,14 @@ export type OAuthAccessTokenVerification =
       readonly missingScopes?: readonly string[];
     };
 
-export interface OAuthConsentRequest {
-  readonly clientName: string;
-  readonly redirectUri: string;
-  readonly scopes: readonly string[];
-  /** Better Auth-signed authorization query. Return it unchanged with the
-   *  consent decision so Better Auth can verify the flow. */
-  readonly oauthQuery: string;
-}
-
-export interface OAuthConsentInfo {
-  readonly id: string;
-  readonly clientId: string;
-  readonly clientName: string;
-  readonly scopes: readonly string[];
-}
-
 // Better Auth's full inferred type pulls plugin internals
 // (`AdminOptions`) that aren't re-exported, so emitting a .d.ts that
 // names that type fails (TS4058). The structural facade keeps the
 // public surface stable.
 export interface Auth {
   readonly basePath: string;
+  /** Better Auth's per-isolate context; Workers must anchor this before responding. */
+  readonly ready?: Promise<void>;
   /** Canonical MCP protected resource when this Auth owns one. */
   readonly mcpResource?: string;
   readonly handler: (request: Request) => Promise<Response>;
@@ -1247,6 +1269,10 @@ const LEGACY_DCR_CLEANUP_INTERVAL_MS = 60 * 60 * 1_000;
 
 export function createAuth(config: CreateAuthConfig): Auth {
   const auth = buildAuth(config);
+  const ready = auth.$context.then(() => undefined);
+  // Observe eager initialization even for low-level callers; keep the original
+  // rejection available to callers awaiting ready and Better Auth's handlers.
+  void ready.catch(() => {});
   const basePath = normalizeAuthBasePath(config.basePath);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const api = auth.api as any;
@@ -1296,6 +1322,7 @@ export function createAuth(config: CreateAuthConfig): Auth {
 
   return {
     basePath,
+    ready,
     ...(config.oauthProvider?.mcpResource
       ? { mcpResource: config.oauthProvider.mcpResource }
       : {}),
@@ -1462,15 +1489,7 @@ export function createAuth(config: CreateAuthConfig): Auth {
               .first<{ clientId: string }>();
             if (!consent) return false;
             const revokedAt = new Date().toISOString();
-            const revokedBefore = Math.floor(Date.now() / 1_000);
             await config.database.batch([
-              config.database
-                .prepare(
-                  `INSERT INTO oauthGrantRevocation (userId, clientId, revokedBefore)
-                   VALUES (?, ?, ?)
-                   ON CONFLICT(userId, clientId) DO UPDATE SET revokedBefore = excluded.revokedBefore`,
-                )
-                .bind(userId, consent.clientId, revokedBefore),
               config.database
                 .prepare(
                   "UPDATE oauthRefreshToken SET revoked = ? WHERE userId = ? AND clientId = ? AND revoked IS NULL",
@@ -1828,12 +1847,12 @@ async function assertActiveMcpGrant(
   const userId = claims["sub"];
   const clientId = claims["azp"];
   const sessionId = claims["sid"];
-  const issuedAt = claims["iat"];
+  const consentId = claims["mantle_consent_id"];
   if (
     typeof userId !== "string" ||
     typeof clientId !== "string" ||
     typeof sessionId !== "string" ||
-    typeof issuedAt !== "number"
+    typeof consentId !== "string" || !consentId
   ) {
     throw new Error("MCP token is not bound to a user session.");
   }
@@ -1847,23 +1866,15 @@ async function assertActiveMcpGrant(
 
   const result = await database
     .prepare(
-      `SELECT consent.resources, consent.scopes, revocation.revokedBefore
-         FROM oauthConsent AS consent
-         LEFT JOIN oauthGrantRevocation AS revocation
-           ON revocation.userId = consent.userId AND revocation.clientId = consent.clientId
-        WHERE consent.userId = ? AND consent.clientId = ?`,
+      "SELECT resources, scopes FROM oauthConsent WHERE id = ? AND userId = ? AND clientId = ?",
     )
-    .bind(userId, clientId)
-    .all<{ resources: string | null; scopes: string; revokedBefore: number | null }>();
+    .bind(consentId, userId, clientId)
+    .first<{ resources: string | null; scopes: string }>();
   const tokenScopes = scopesFromClaim(claims["scope"]);
-  const active = (result.results ?? []).some((row) => {
-    const resources = parseStoredStringArray(row.resources);
-    const scopes = parseStoredStringArray(row.scopes);
-    return resources?.includes(audience) === true &&
-      scopes !== null &&
-      (row.revokedBefore == null || issuedAt > row.revokedBefore) &&
-      tokenScopes.every((scope) => scopes.includes(scope));
-  });
+  const resources = parseStoredStringArray(result?.resources);
+  const scopes = parseStoredStringArray(result?.scopes);
+  const active = resources?.includes(audience) === true && scopes !== null &&
+    tokenScopes.every((scope) => scopes.includes(scope));
   if (!active) throw new Error("MCP authorization grant is no longer active.");
 }
 
