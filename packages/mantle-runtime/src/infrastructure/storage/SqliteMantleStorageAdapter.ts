@@ -35,6 +35,18 @@ import { DatabaseMediaAssetRepository } from "../persistence/DatabaseMediaAssetR
 import { DatabasePendingUploadRepository } from "../persistence/DatabasePendingUploadRepository.js";
 import { DatabaseSiteConfigRepository } from "../persistence/DatabaseSiteConfigRepository.js";
 
+export interface SqliteMantleStorageAdapterOptions {
+  /**
+   * Decorate only the site-config repository used by preparation and the
+   * prepared runtime. Platform adapters may attach platform-owned write
+   * consequences without importing Runtime's concrete SQL repository.
+   * The supplied repository remains the canonical SQLite authority.
+   */
+  readonly decorateSiteConfigRepository?: (
+    canonical: SiteConfigRepository,
+  ) => SiteConfigRepository;
+}
+
 /** Existing SQLite/D1 implementation behind the semantic preparation seam. */
 export class SqliteMantleStorageAdapter implements MantleStorageAdapter {
   readonly nativeViewDialects = ["sqlite"] as const;
@@ -43,8 +55,10 @@ export class SqliteMantleStorageAdapter implements MantleStorageAdapter {
   constructor(
     private readonly db: DatabaseDriver,
     private readonly siteDefaults?: SiteDefaults,
+    options: SqliteMantleStorageAdapterOptions = {},
   ) {
-    this.siteConfig = new DatabaseSiteConfigRepository(db);
+    const canonical = new DatabaseSiteConfigRepository(db);
+    this.siteConfig = options.decorateSiteConfigRepository?.(canonical) ?? canonical;
   }
 
   async prepare(plan: RuntimePlan): Promise<PreparedMantleStorage> {

@@ -10,6 +10,7 @@ import type { PublicPathResolver, TemplateRegistry } from "@aotter/mantle-web";
 import type { SiteDefaults } from "@aotter/mantle-spec";
 import type { Auth } from "../auth/createAuth.js";
 import type { ConsumerCredentialResolver } from "./resolveCaller.js";
+import type { McpCatalogKvBinding } from "../bindings/KvSiteConfigRepository.js";
 
 /**
  * Consumer-supplied config for the Cloudflare adapter mounts. `auth`
@@ -38,6 +39,10 @@ export interface MantleCloudflareConfig {
      *  `WorkersQueueHookDispatcher` bound to the `mantle-internal` queue
      *  here. */
     readonly deferredHookDispatcher?: DeferredHookDispatcher;
+    /** Optional Cloudflare KV projection for MCP catalog site settings.
+     *  Low-level compositions must provide a stable deployment-owned scope;
+     *  the conventional `MANTLE_KV` binding uses the isolated `default` scope. */
+    readonly mcpCatalogKv?: McpCatalogKvBinding;
   };
   /** Pass-through to runtime: SVG opt-in flag (default false). */
   readonly mediaAllowSvg?: boolean;

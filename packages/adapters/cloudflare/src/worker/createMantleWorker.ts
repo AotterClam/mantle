@@ -104,6 +104,8 @@ export interface MantleExtensionApp<Bindings extends object> {
 
 export interface MantleCloudflareEnv extends ConventionalAuthEnv {
   readonly ASSETS?: Fetcher;
+  /** Optional derived MCP catalog snapshot. D1 remains canonical. */
+  readonly MANTLE_KV?: KVNamespace;
 }
 
 export interface MantleWorkerBootstrapContext<Env extends MantleCloudflareEnv> {

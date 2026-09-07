@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type {
   MantleStorageAdapter,
   PreparedMantleStorage,
+  SiteConfigRepository,
   ViewQueryExecutor,
 } from "../src/domain/port/index.js";
 import {
@@ -50,6 +51,41 @@ describe("prepareDeployment", () => {
     expect(db.executions.slice(before).map(({ sql }) => sql)).toEqual([
       "SELECT fingerprint FROM _mantle_boot_state WHERE id = ? LIMIT 1",
     ]);
+  });
+
+  it("uses one injected site-config repository for preparation and runtime binding", async () => {
+    const db = new InMemoryDatabase();
+    const calls: string[] = [];
+    let decorated: SiteConfigRepository | undefined;
+    const adapter = new SqliteMantleStorageAdapter(
+      db,
+      { brand: "Injected" },
+      {
+        decorateSiteConfigRepository: (canonical) => {
+          decorated = {
+            seed: async (defaults) => {
+              calls.push("seed");
+              await canonical.seed(defaults);
+            },
+            load: () => canonical.load(),
+            readLocales: () => canonical.readLocales(),
+            readMediaPurposes: () => canonical.readMediaPurposes(),
+            updateEditable: async (values) => {
+              calls.push("update");
+              await canonical.updateEditable?.(values);
+            },
+          };
+          return decorated;
+        },
+      },
+    );
+
+    const prepared = await prepareDeployment(compilePlan(declarativeManifest), adapter);
+
+    expect(prepared.storage.siteConfig).toBe(decorated);
+    expect(prepared.storage.localePolicy).toBe(decorated);
+    expect(calls).toEqual(["seed"]);
+    expect((await prepared.storage.siteConfig?.load()).brand).toBe("Injected");
   });
 
   it("accepts application-owned semantic ports without a table mapping DSL", async () => {
