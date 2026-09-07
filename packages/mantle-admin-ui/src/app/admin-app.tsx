@@ -7,6 +7,7 @@ import type { AdminUser } from "../lib/types";
 import { useAdminLocation } from "./router";
 import {
   AccessDeniedView,
+  ConnectedAppsPage,
   ConnectedAppsView,
   GateError,
   GateLoading,
@@ -56,6 +57,7 @@ function Gate({ path }: { path: string }): React.ReactElement {
   if (is401) return <GateLoading />;
 
   if (me.isError && me.error instanceof ApiError && me.error.status === 403) {
+    if (path === "/admin/connected-apps") return <ConnectedAppsPage />;
     const body = (me.error.body ?? {}) as { login?: string | null };
     return <AccessDeniedView login={body.login ?? null} />;
   }
