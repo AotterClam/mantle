@@ -36,6 +36,7 @@ describe("mountMantleOAuth", () => {
     expect(res?.status).toBe(200);
     expect(await res?.text()).toContain('id="root"');
     expect(res?.headers.get("cache-control")).toBe("private, no-store");
+    expect(res?.headers.get("referrer-policy")).toBe("same-origin");
     expect(res?.headers.get("content-security-policy")).toContain("script-src 'self'");
     expect(res?.headers.get("content-security-policy")).not.toContain("unsafe-inline");
 
@@ -126,6 +127,7 @@ describe("mountMantleOAuth", () => {
     );
 
     expect(res.status).toBe(200);
+    expect(res.headers.get("referrer-policy")).toBe("same-origin");
     expect(res.headers.get("content-security-policy")).toContain("script-src 'nonce-");
     const html = await res.text();
     expect(html).toContain("Claude");

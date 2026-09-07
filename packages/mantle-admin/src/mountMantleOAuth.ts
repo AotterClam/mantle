@@ -53,7 +53,7 @@ function oauthPageHeaders(nonce: string): Record<string, string> {
     "cache-control": "private, no-store",
     "content-security-policy":
       `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`,
-    "referrer-policy": "no-referrer",
+    "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
   };
@@ -63,7 +63,7 @@ const OAUTH_SPA_HEADERS = {
   "cache-control": "private, no-store",
   "content-security-policy":
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
-  "referrer-policy": "no-referrer",
+  "referrer-policy": "same-origin",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
 } as const;
