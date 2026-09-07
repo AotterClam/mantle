@@ -38,6 +38,8 @@ if (false) {
   app.get("/mcp/staff", (c) => c.text("no"));
   // @ts-expect-error Mantle owns OAuth discovery endpoints.
   app.get("/.well-known/oauth-authorization-server", (c) => c.text("no"));
+  // @ts-expect-error Mantle owns the conventional site icon route.
+  app.get("/favicon.ico", (c) => c.text("no"));
   app.get("/favicon.svg", (c) => c.text("consumer asset fallback"));
   // @ts-expect-error Global catch-alls could affect Core surfaces.
   app.all("*", (c) => c.text("no"));

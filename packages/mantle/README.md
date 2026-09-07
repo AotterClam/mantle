@@ -148,6 +148,7 @@ reserved:
 - `/oauth` and `/oauth/*`
 - `/mcp` and `/mcp/*`
 - `/.well-known/oauth*`
+- `/favicon.ico`
 - global `*` and `/*` handlers
 
 A custom Auth factory's `basePath` and exact manifest-owned method/path pairs

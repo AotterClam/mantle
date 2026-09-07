@@ -48,7 +48,7 @@ export const MANTLE_RESERVED_PATH_PREFIXES = [
 export const MANTLE_RESERVED_WELL_KNOWN_PREFIX = "/.well-known/oauth" as const;
 
 /** Exact registrations extensions may not claim. */
-export const MANTLE_RESERVED_EXACT_PATHS = ["*", "/*"] as const;
+export const MANTLE_RESERVED_EXACT_PATHS = ["/favicon.ico", "*", "/*"] as const;
 
 type ReservedPrefix = (typeof MANTLE_RESERVED_PATH_PREFIXES)[number];
 type ReservedExact = (typeof MANTLE_RESERVED_EXACT_PATHS)[number];
@@ -206,6 +206,13 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
 
     const app = new Hono<WorkerHonoEnv<Env>>();
     mountRuntimeEndpoints(app, ref);
+    app.get("/favicon.ico", async (c) => {
+      const icons = (await (await ref!.get()).siteConfig.load()).icons;
+      const icon = icons.find((candidate) => candidate.mimeType === "image/png" && !candidate.theme)
+        ?? icons.find((candidate) => !candidate.theme)
+        ?? icons[0];
+      return icon ? c.redirect(icon.src) : c.notFound();
+    });
     if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
     mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
     const mcpResource = auth.mcpResource ?? conventionalMcpResource(env);
