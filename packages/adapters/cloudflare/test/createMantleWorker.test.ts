@@ -106,6 +106,25 @@ describe("createMantleWorker", () => {
     expect(db.appliedMigrations.size).toBeGreaterThan(0);
   });
 
+  it("keeps the conventional favicon linked to the configured site icon", async () => {
+    const worker = createMantleWorker<TestEnv>({
+      plan: compileTestPlan([]),
+      auth: () => stubAuth,
+      bindings: testBindings,
+      siteDefaults: {
+        icons: [
+          { src: "/site-icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+          { src: "/site-icon.png", mimeType: "image/png", sizes: ["64x64"] },
+        ],
+      },
+    });
+
+    const response = await fetchWorker(worker, "/favicon.ico", testEnv());
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/site-icon.png");
+  });
+
   it("passes Env and waitUntil to typed handlers", async () => {
     const handler: HandlerFn<Record<string, never>, { name: string }, TestEnv> = (_input, ctx) => {
       expect(typeof ctx.waitUntil).toBe("function");
