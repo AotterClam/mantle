@@ -3,7 +3,7 @@ import {
   createMantleRequestHandler,
   projectCallableCapabilities,
 } from "@aotter/mantle-runtime";
-import { rejectCrossOriginMutation } from "../auth/rejectCrossOriginMutation.js";
+import { rejectCrossOriginMutation } from "@aotter/mantle-admin";
 import type { MantleRuntimeRef } from "./bootRuntimeOnce.js";
 import { resolveCaller } from "./resolveCaller.js";
 
