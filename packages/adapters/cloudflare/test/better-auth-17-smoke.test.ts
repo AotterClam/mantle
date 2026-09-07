@@ -2,15 +2,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_MIGRATIONS } from "@aotter/mantle-runtime";
 import { createAuth } from "../src/auth/createAuth.js";
 import { sqliteD1 } from "./fakes/sqlite-d1.js";
+import { createMantleWorker } from "../src/worker/createMantleWorker.js";
+import { compileTestPlan } from "./compileTestPlan.js";
 
 const ORIGIN = "https://site.example.com";
 const RESOURCE = `${ORIGIN}/mcp`;
 const CLIENT_ID = "https://client.example.com/oauth/client.json";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("Better Auth 1.7 MCP smoke", () => {
+  it("initializes Better Auth and OAuth discovery on an empty Worker database", async () => {
+    const { db, sqlite } = sqliteD1();
+    const worker = createMantleWorker({
+      plan: compileTestPlan([]),
+      auth: () => createAuth({
+        database: db, baseURL: ORIGIN, secret: "x".repeat(40),
+        methods: [{ kind: "email-otp", sender: { send: async () => {} } }],
+        oauthProvider: { loginPage: "/admin/sign-in", consentPage: "/oauth/consent", scopes: ["mcp"], mcpResource: RESOURCE },
+      }),
+    });
+    const pending: Promise<unknown>[] = [];
+    const response = await worker.fetch(new Request(`${ORIGIN}/.well-known/oauth-authorization-server/api/auth`), {
+      DB: db,
+    }, { waitUntil: (promise: Promise<unknown>) => pending.push(promise) } as unknown as ExecutionContext);
+    expect(response.status).toBe(200);
+    await Promise.all(pending);
+    sqlite.close();
+  });
+
   it("discovers CIMD clients, retains their metadata, and prunes only expired DCR rows", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     const { db, sqlite } = sqliteD1();
     for (const migration of CANONICAL_MIGRATIONS) sqlite.exec(migration.sql);
     let otp = "";
@@ -30,7 +55,7 @@ describe("Better Auth 1.7 MCP smoke", () => {
         "urn:ietf:params:oauth:grant-type:jwt-bearer",
       ],
       response_types: ["code"],
-      scope: "mcp",
+      scope: "mcp offline_access",
     };
     const metadataFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       expect(init?.redirect).toBe("manual");
@@ -64,11 +89,11 @@ describe("Better Auth 1.7 MCP smoke", () => {
       oauthProvider: {
         loginPage: "/admin/sign-in",
         consentPage: "/oauth/consent",
-        scopes: ["mcp"],
+        scopes: ["mcp", "offline_access"],
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
         clientRegistrationDefaultScopes: ["mcp"],
-        clientRegistrationAllowedScopes: ["mcp"],
+        clientRegistrationAllowedScopes: ["mcp", "offline_access"],
         mcpResource: RESOURCE,
       },
     });
@@ -101,7 +126,7 @@ describe("Better Auth 1.7 MCP smoke", () => {
       code_challenge: await pkceChallenge(verifier),
       code_challenge_method: "S256",
       resource: RESOURCE,
-      scope: "mcp",
+      scope: "mcp offline_access",
       state: "state-1",
     }).toString();
     const response = await auth.handler(new Request(authorize));
@@ -140,7 +165,7 @@ describe("Better Auth 1.7 MCP smoke", () => {
     expect(consent).toMatchObject({
       clientName: metadata.client_name,
       redirectUri: metadata.redirect_uris[0],
-      scopes: ["mcp"],
+      scopes: ["mcp", "offline_access"],
     });
     const tampered = new URL(consentUrl);
     tampered.searchParams.set("scope", "mcp admin");
@@ -178,7 +203,9 @@ describe("Better Auth 1.7 MCP smoke", () => {
       }),
     }));
     expect(token.status).toBe(200);
-    const accessToken = String((await token.json() as { access_token?: string }).access_token);
+    const tokens = await token.json() as { access_token: string; refresh_token: string };
+    const accessToken = tokens.access_token;
+    expect(tokens.refresh_token).toEqual(expect.any(String));
     const verification = await auth.verifyOAuthAccessToken(
       new Request(RESOURCE, { headers: { authorization: `Bearer ${accessToken}` } }),
       { audience: RESOURCE, scopes: ["mcp"] },
@@ -187,7 +214,7 @@ describe("Better Auth 1.7 MCP smoke", () => {
       ok: true,
       userId: expect.any(String),
       clientId: CLIENT_ID,
-      scopes: ["mcp"],
+      scopes: ["mcp", "offline_access"],
     });
     if (!verification.ok) throw new Error("expected a verified MCP access token");
 
@@ -232,7 +259,7 @@ describe("Better Auth 1.7 MCP smoke", () => {
     await expect(registration.json()).resolves.toMatchObject({
       client_name: "Legacy DCR agent",
       token_endpoint_auth_method: "none",
-      scope: "mcp",
+      scope: "mcp offline_access",
     });
 
     const consents = await auth.listOAuthConsents!(verification.userId);
@@ -240,8 +267,15 @@ describe("Better Auth 1.7 MCP smoke", () => {
       id: expect.any(String),
       clientId: CLIENT_ID,
       clientName: metadata.client_name,
-      scopes: ["mcp"],
+      scopes: ["mcp", "offline_access"],
     }]);
+    const originalConsentId = consents[0]!.id;
+    expect(JSON.parse(Buffer.from(accessToken.split(".")[1]!, "base64url").toString()))
+      .toMatchObject({ mantle_consent_id: originalConsentId });
+    // Model a refresh row whose insertion was delayed across the revoke batch.
+    sqlite.prepare("CREATE TEMP TABLE delayed_refresh AS SELECT * FROM oauthRefreshToken WHERE referenceId = ?")
+      .run(originalConsentId);
+    expect(await auth.revokeOAuthConsent!("another-user", consents[0]!.id)).toBe(false);
     const now = new Date().toISOString();
     const future = new Date(Date.now() + 60_000).toISOString();
     sqlite.prepare(`
@@ -293,21 +327,99 @@ describe("Better Auth 1.7 MCP smoke", () => {
       "SELECT id FROM verification WHERE id = 'unrelated-verification'",
     ).get()).toEqual({ id: "unrelated-verification" });
     expect(await auth.revokeOAuthConsent!(verification.userId, consents[0]!.id)).toBe(false);
-    expect(sqlite.prepare(
-      "SELECT revokedBefore FROM oauthGrantRevocation WHERE userId = ? AND clientId = ?",
-    ).get(verification.userId, CLIENT_ID)).toMatchObject({
-      revokedBefore: expect.any(Number),
-    });
 
-    sqlite.prepare(`
-      INSERT INTO oauthConsent
-        (id, clientId, userId, resources, scopes, createdAt, updatedAt)
-      VALUES ('reauthorized-consent', ?, ?, ?, '["mcp"]', ?, ?)
-    `).run(CLIENT_ID, verification.userId, JSON.stringify([RESOURCE]), now, now);
+    const refreshAfterRevoke = await auth.handler(new Request(`${ORIGIN}/api/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: tokens.refresh_token }),
+    }));
+    expect(refreshAfterRevoke.status).toBe(400);
+    await expect(refreshAfterRevoke.json()).resolves.toMatchObject({ error: "invalid_grant" });
+
+    // Reconnect through the real protocol, even in the same clock second.
+    authorize.searchParams.set("state", "state-2");
+    const reconnect = await auth.handler(new Request(authorize, { headers: { cookie: cookies } }));
+    expect(reconnect.status).toBe(302);
+    cookies = mergeCookies(cookies, reconnect);
+    const reconnectConsent = await auth.getOAuthConsentRequest(new Request(
+      new URL(reconnect.headers.get("location")!, ORIGIN),
+      { headers: { cookie: cookies } },
+    ));
+    expect(reconnectConsent).not.toBeNull();
+    const reconnected = new URL(await auth.completeOAuthConsent(new Request(`${ORIGIN}/oauth/consent`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookies },
+      body: new URLSearchParams({ oauth_query: reconnectConsent!.oauthQuery }),
+    }), true));
+    const newToken = await auth.handler(new Request(`${ORIGIN}/api/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: CLIENT_ID,
+        redirect_uri: metadata.redirect_uris[0],
+        code: reconnected.searchParams.get("code")!,
+        code_verifier: verifier,
+        resource: RESOURCE,
+      }),
+    }));
+    expect(newToken.status).toBe(200);
+    const newAccessToken = String((await newToken.json() as { access_token?: string }).access_token);
+    const newConsents = await auth.listOAuthConsents!(verification.userId);
+    expect(newConsents[0]!.id).not.toBe(originalConsentId);
+    expect(JSON.parse(Buffer.from(newAccessToken.split(".")[1]!, "base64url").toString()))
+      .toMatchObject({ mantle_consent_id: newConsents[0]!.id });
+    await expect(auth.verifyOAuthAccessToken(newAccessToken, {
+      audience: RESOURCE, scopes: ["mcp"],
+    })).resolves.toMatchObject({ ok: true, userId: verification.userId });
     await expect(auth.verifyOAuthAccessToken(
       new Request(RESOURCE, { headers: { authorization: `Bearer ${accessToken}` } }),
       { audience: RESOURCE, scopes: ["mcp"] },
     )).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+
+    sqlite.exec("INSERT INTO oauthRefreshToken SELECT * FROM delayed_refresh; DROP TABLE delayed_refresh;");
+    const delayedRefresh = await auth.handler(new Request(`${ORIGIN}/api/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: tokens.refresh_token }),
+    }));
+    expect(delayedRefresh.status).toBe(200);
+    const delayedTokens = await delayedRefresh.json() as { access_token: string; refresh_token: string };
+    const delayedAccessToken = delayedTokens.access_token;
+    expect(JSON.parse(Buffer.from(delayedAccessToken.split(".")[1]!, "base64url").toString()))
+      .toMatchObject({ mantle_consent_id: originalConsentId });
+    await expect(auth.verifyOAuthAccessToken(delayedAccessToken, {
+      audience: RESOURCE, scopes: ["mcp"],
+    })).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+
+    const rotatedRefresh = await auth.handler(new Request(`${ORIGIN}/api/auth/oauth2/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: delayedTokens.refresh_token }),
+    }));
+    expect(rotatedRefresh.status).toBe(200);
+    const rotatedAccessToken = (await rotatedRefresh.json() as { access_token: string }).access_token;
+    expect(JSON.parse(Buffer.from(rotatedAccessToken.split(".")[1]!, "base64url").toString()))
+      .toMatchObject({ mantle_consent_id: originalConsentId });
+    await expect(auth.verifyOAuthAccessToken(rotatedAccessToken, {
+      audience: RESOURCE, scopes: ["mcp"],
+    })).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+
+    sqlite.prepare("UPDATE session SET expiresAt = ? WHERE userId = ?")
+      .run(new Date(Date.now() - 1_000).toISOString(), verification.userId);
+    await expect(auth.verifyOAuthAccessToken(newAccessToken, {
+      audience: RESOURCE, scopes: ["mcp"],
+    })).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+
+    metadataFetch.mockResolvedValueOnce(new Response(null, {
+      status: 302, headers: { location: "https://redirect-target.example.com/private" },
+    }));
+    const redirectingClient = new URL(authorize);
+    redirectingClient.searchParams.set("client_id", "https://redirect-client.example.com/oauth/client.json");
+    const refusedMetadata = await auth.handler(new Request(redirectingClient));
+    expect(refusedMetadata.status).toBe(400);
+    await expect(refusedMetadata.json()).resolves.toMatchObject({ error: "invalid_client" });
+    expect(metadataFetch).toHaveBeenCalledTimes(2);
 
     sqlite.close();
   });

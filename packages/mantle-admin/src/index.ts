@@ -14,3 +14,12 @@ export {
   runMantleUseCase,
   type StaffRole,
 } from "./mountMantleAdmin.js";
+export {
+  handleMantleOAuth,
+  mountMantleOAuth,
+  type MantleOAuthAuth,
+  type MantleOAuthOptions,
+  type OAuthConsentInfo,
+  type OAuthConsentRequest,
+} from "./mountMantleOAuth.js";
+export { rejectCrossOriginMutation } from "./rejectCrossOriginMutation.js";

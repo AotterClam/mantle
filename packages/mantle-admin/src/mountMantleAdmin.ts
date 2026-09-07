@@ -192,6 +192,7 @@ export function mountMantleAdmin<E extends Env>(
     "/admin/c/:collection/:id",
     "/admin/media",
     "/admin/preferences",
+    "/admin/connected-apps",
     "/admin/settings",
     "/admin/staff",
     "/admin/members",
