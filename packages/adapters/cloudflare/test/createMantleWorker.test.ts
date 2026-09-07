@@ -85,8 +85,10 @@ describe("createMantleWorker", () => {
 
   it("boots before the initial MCP challenge and OAuth discovery", async () => {
     const db = new InMemoryDatabase();
+    const ready = Promise.resolve();
     const auth = {
       ...stubAuth,
+      ready,
       handler: async () => new Response("auth transport"),
     };
     const worker = createMantleWorker<TestEnv>({
@@ -95,7 +97,13 @@ describe("createMantleWorker", () => {
       bindings: () => ({ db, adminAssets: new StubAssetServer() }),
     });
 
-    expect((await fetchWorker(worker, "/mcp/staff", testEnv())).status).toBe(401);
+    const waitUntil = vi.fn();
+    expect((await worker.fetch(
+      new Request("https://site.test/mcp/staff"),
+      testEnv(),
+      { waitUntil, passThroughOnException() {}, props: {} } as unknown as ExecutionContext,
+    )).status).toBe(401);
+    expect(waitUntil).toHaveBeenCalledWith(ready);
     expect(db.appliedMigrations.size).toBeGreaterThan(0);
 
     expect((await fetchWorker(

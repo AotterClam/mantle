@@ -1100,6 +1100,8 @@ export type OAuthAccessTokenVerification =
 // public surface stable.
 export interface Auth {
   readonly basePath: string;
+  /** Better Auth's per-isolate context; Workers must anchor this before responding. */
+  readonly ready?: Promise<void>;
   /** Canonical MCP protected resource when this Auth owns one. */
   readonly mcpResource?: string;
   readonly handler: (request: Request) => Promise<Response>;
@@ -1286,6 +1288,7 @@ export function createAuth(config: CreateAuthConfig): Auth {
 
   return {
     basePath,
+    ready: auth.$context.then(() => undefined),
     ...(config.oauthProvider?.mcpResource
       ? { mcpResource: config.oauthProvider.mcpResource }
       : {}),
