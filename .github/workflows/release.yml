@@ -38,7 +38,7 @@ jobs:
     # Single source of truth for the ten public packages, in dependency order.
     # Names are read from these package.json files during packing.
     env:
-      LANDING_SHA: ac38500aa8b0489265c82b95dc982352fcc38d69
+      LANDING_SHA: ebcff1b02e299e607722ec1bcf085a1420afdf38
       STARTER_SHA: bb8c23cf13fb5acd2922713d6be3c9b24bb917b8
       PKG_DIRS: >-
         packages/mantle-spec
