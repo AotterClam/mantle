@@ -5,7 +5,7 @@ engine built around a 4-atom YAML model (Schema / View / Procedure / Trigger)
 where agents write config and the runtime carries the complexity.
 
 > Mantle is prerelease software. Use this package's `package.json` as the exact
-> installed version; APIs may change between prereleases until v0.1.0.
+> installed version; APIs may change between prereleases until the first stable 0.1.2 release.
 
 ## Install
 
@@ -100,6 +100,7 @@ project may also carry `.agent/skills/`, which is left untouched. Manifest
 generation never rewrites agent instructions.
 
 SDK upgrades use the package manager and the version-matched update skill.
+For npm peer-resolution troubleshooting, see [the authoring guide](docs/direct-authoring.md#npm-optional-peer-resolution).
 See [0.1.2 migration](docs/migration-0.1.2.md) for removed bundle APIs and how to
 preserve legacy application source and provider configuration.
 
@@ -127,7 +128,8 @@ configuration keeps public routes available but returns `503 setup_incomplete`
 from Auth-owned private routes. Pass `auth: (env) => Auth` only when the site
 needs to replace this conventional factory; Core still owns the Auth routes.
 The exact bindings and validation rules are in the
-[Cloudflare adapter README](../adapters/cloudflare/README.md#conventional-auth).
+`node_modules/@aotter/mantle-cloudflare/README.md`, under “Conventional Auth”
+(path relative to the application root).
 
 Extensions may add routes but may not replace Core surfaces. These paths are
 reserved:

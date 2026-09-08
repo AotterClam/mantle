@@ -338,7 +338,10 @@ spec:
 
 **Param-driven Views** declare `spec.params` (a JSON Schema with
 `type: object`); SQL references required properties as named `:params`. The
-runtime validates and binds them; it never interpolates caller values:
+runtime validates and binds them; it never interpolates caller values. Quote
+SQL identifiers containing hyphens with double quotes (for example,
+`"post-translations"`). Generation/static validation does not execute native SQL;
+run the View on the selected adapter or use `mantle-harness indexes` to check it:
 
 ```yaml
 apiVersion: cms.mantle.aotter.net/v1
@@ -348,7 +351,7 @@ spec:
   surface: public
   sql: |
     SELECT id, slug, locale, title, updatedAt
-    FROM post-translations
+    FROM "post-translations"
     WHERE status = 'published' AND locale = :locale
     ORDER BY slug ASC
   params:
@@ -700,6 +703,46 @@ spec:
 | `upsert` | If `match` is declared, queries by matched natural key fields: if found, updates the row via `projectUpdateAndStamp` using the row's existing version; if not found, creates a new row. If `match` is omitted (legacy), updates when `input.id` resolves, else creates. | If `match` is set, matched fields must match a declared unique index on the Schema, be declared in `input.properties`, and appear in `input.required`; `id` and `expectedVersion` must NOT be in `input`. If `match` is omitted and `id` or `expectedVersion` is declared, both must be declared with strict string/number types. |
 | `delete` | Hard DELETE by id. | `input.id` (strict string) is required in `input.required`. |
 | `archive` | Soft-archive a publishing entry (`status='archived'`). | Valid only on Schemas with `lifecycle: publishing`. `input.id` (strict string) is required in `input.required`. |
+
+A builtin `create` returns the created `EntryRow`, not just an id or the
+submitted fields. Its `data` contains Schema fields; the row also includes
+`id`, `collection`, `status`, `version`, nullable `authorId`, and numeric
+`createdAt`/`updatedAt` timestamps in milliseconds. Localized rows may include
+`locale`. A manifest HTTP Trigger wraps a successful result as
+`{ "ok": true, "data": <EntryRow> }` (HTTP 200).
+
+For example, an HTTP Trigger targeting builtin create on an operational
+`support-requests` Schema receives this request body:
+
+```json
+{ "title": "Need help", "email": "visitor@example.test", "description": "Cannot sign in" }
+```
+
+Its response has this shape (id and timestamps are illustrative):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "request-1",
+    "collection": "support-requests",
+    "status": "published",
+    "version": 1,
+    "data": { "title": "Need help", "email": "visitor@example.test", "description": "Cannot sign in" },
+    "authorId": null,
+    "createdAt": 1788879363492,
+    "updatedAt": 1788879363492
+  }
+}
+```
+
+Declare `Procedure.spec.output` against the row, not the HTTP envelope. For
+example, `output: { type: object, required: [id], properties: { id: { type: string } } }`
+checks that an id exists. Output validation does **not** strip other returned
+fields. Use a `ref` handler with an explicit projection when callers should
+receive a smaller result. A publishing Schema starts at `draft`; operational
+`published` status does not grant public read access—View authorization still
+controls reads.
 
 The Procedure's `input` is the contract with the *caller*. It MAY
 declare fields the Schema does not (e.g. a Turnstile token). The

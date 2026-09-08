@@ -35,3 +35,24 @@ visitor homepage merely because a public data endpoint works.
 
 For existing projects use [the 0.1.2 migration notes](migration-0.1.2.md).
 For application patterns see [transaction coordination](transaction-patterns.md).
+
+## npm optional peer resolution
+
+The reference and SDK checks use pnpm 9+. With npm 11.16.0, a cold Cloudflare
+install can fail with `ERESOLVE`: Better Auth/Drizzle selects optional
+`@libsql/client@0.18.0`, while this SDK declares the tested `^0.17.4` peer.
+If that exact conflict occurs, merge this into the application's package.json
+and rerun `npm install`:
+
+```json
+{ "overrides": { "@libsql/client": "0.17.4" } }
+```
+
+Preserve other overrides and the selected exact Mantle versions. This only
+constrains npm's optional peer resolution; Cloudflare does not need a new
+libSQL dependency. For a Vercel/libSQL application, select the client according
+to the installed adapter's peer contract and keep any direct dependency and
+override consistent. Do not use `--force` or `--legacy-peer-deps` to hide an
+incompatible graph. Commit the resulting lockfile and use `npm ci` afterward.
+Recheck the installed package's peer range when upgrading; this workaround is
+specific to the dependency versions above.

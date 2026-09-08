@@ -2,6 +2,10 @@
 
 Runtime engine for mantle.
 
+Documentation paths beginning with `node_modules/` below are relative to the
+application root. Shared guides ship in the same-version `@aotter/mantle`
+package; in an SDK checkout, those guides live under the root `docs/`.
+
 This package owns the adapter-neutral Core pipeline after semantic compilation.
 Storage adapters prepare `RuntimePlan` into existing content repositories/readers
 and a `ViewQueryExecutor`; SQL-shaped drivers remain SQLite/D1 implementation
@@ -102,13 +106,13 @@ still need adapter-specific tests. A passing report is a version-specific
 baseline, not certification of every storage feature.
 
 For a fresh adapter implementation, start with
-[`docs/adapter-guide.md`](../../docs/adapter-guide.md) and
-[`docs/adr/0019-sealed-manifest-runtime-pipeline.md`](../../docs/adr/0019-sealed-manifest-runtime-pipeline.md).
+`node_modules/@aotter/mantle/docs/adapter-guide.md` and
+`node_modules/@aotter/mantle/docs/adr/0019-sealed-manifest-runtime-pipeline.md`.
 
 Queue-backed `after_*` lifecycle delivery is optional and at-least-once. See
-[`docs/deferred-lifecycle-queues.md`](../../docs/deferred-lifecycle-queues.md)
+`node_modules/@aotter/mantle/docs/deferred-lifecycle-queues.md`
 for the strict envelope, idempotency key, Cloudflare bindings, retry/DLQ
 behavior, and upgrade procedure.
 
 This package is prerelease software. Its `package.json` is the exact version
-authority; the API surface may change until `v0.1.0`.
+authority; the API surface may change until the first stable `0.1.2` release.
