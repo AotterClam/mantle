@@ -1,0 +1,8 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "mantle-parity-812-tail",
+  "main": "./parity-tail.ts",
+  "compatibility_date": "2026-07-08",
+  "workers_dev": false,
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mantle-parity-812" }]
+}

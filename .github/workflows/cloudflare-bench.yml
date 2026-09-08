@@ -16,6 +16,7 @@ on:
       - packages/mantle-web/package.json
       - pnpm-workspace.yaml
       - scripts/run-wrangler-performance.mjs
+      - scripts/run-wrangler-parity.mjs
       - .github/workflows/cloudflare-bench.yml
   push:
     branches: [main, develop]
@@ -31,6 +32,7 @@ on:
       - packages/mantle-web/package.json
       - pnpm-workspace.yaml
       - scripts/run-wrangler-performance.mjs
+      - scripts/run-wrangler-parity.mjs
       - .github/workflows/cloudflare-bench.yml
 
 concurrency:

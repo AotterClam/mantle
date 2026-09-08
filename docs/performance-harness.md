@@ -212,3 +212,10 @@ separately. Worker wall clocks advance on I/O and are not a CPU timer; use the
 [official CPU profiler](https://developers.cloudflare.com/workers/observability/dev-tools/cpu-usage/).
 Measure diagnostics off/on overhead with the same workload before interpreting
 small latency differences.
+
+### Matched native facade controls (#812)
+
+`pnpm bench:wrangler` now also runs the native parity smoke. The full
+`pnpm bench:parity` matrix adds real Auth/MCP, cold workerd processes, R2,
+TTFB/full-body timing and CPU/heap evidence. See
+[the controls, gates and reproducible commands](./adr-lite-812-native-parity.md).

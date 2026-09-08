@@ -5,8 +5,8 @@ import {
   D1DatabaseDriver,
   createMantleWorker,
   mountPublicRoutes,
-  type D1QueryMetric,
 } from "../../src/index.js";
+import { instrumentD1, runWithRequestDiagnostics, type RequestDiagnosticRecord } from "../../src/testing.js";
 import { compileTestPlan } from "../compileTestPlan.js";
 import { stubAuth } from "../fakes/runtime-bindings.js";
 
@@ -111,7 +111,6 @@ const manifests: Manifest[] = [
   },
 ];
 
-let activeMetrics: D1QueryMetric[] | null = null;
 let routeCount = 0;
 let state: ReturnType<typeof createState> | null = null;
 
@@ -141,7 +140,7 @@ function createState(env: Env) {
       locales: ["en"],
     },
     bindings: () => ({
-      db: new D1DatabaseDriver(env.DB, (metric) => activeMetrics?.push(metric)),
+      db: new D1DatabaseDriver(instrumentD1(env.DB), () => {}),
       adminAssets: { fetch: async () => new Response("<!doctype html><title>Admin fixture</title>", { headers: { "content-type": "text/html" } }) },
     }),
     auth: () => staffAuth,
@@ -219,20 +218,13 @@ export default {
       return seed(env, Number(url.searchParams.get("until") ?? 0));
     }
 
-    const current = state ??= createState(env);
-    const metrics: D1QueryMetric[] = [];
-    activeMetrics = metrics;
-    try {
-      const response = await current.worker.fetch(request, env, executionCtx);
-      const measured = new Response(response.body, response);
-      measured.headers.set("x-mantle-query-count", String(metrics.length));
-      measured.headers.set(
-        "x-mantle-rows-read",
-        String(metrics.reduce((sum, metric) => sum + metric.rowsRead, 0)),
-      );
-      return measured;
-    } finally {
-      activeMetrics = null;
-    }
+    let record: RequestDiagnosticRecord | undefined;
+    const response = await runWithRequestDiagnostics({ surface: "web", bindings: { d1: true } },
+      () => (state ??= createState(env)).worker.fetch(request, env, executionCtx),
+      (value) => { record = value; });
+    const measured = new Response(response.body, response);
+    measured.headers.set("x-mantle-query-count", String(record!.d1!.statements));
+    measured.headers.set("x-mantle-rows-read", String(record!.d1!.rowsRead ?? 0));
+    return measured;
   },
 };

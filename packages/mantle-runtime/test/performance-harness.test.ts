@@ -163,6 +163,31 @@ describe("performance harness", () => {
       rowsRead: { p50: 30, p95: 40, max: 40 },
     });
   });
+  it("bounds concurrent arrivals, checks responses after body timing, and exposes both HTTP clocks", async () => {
+    let active = 0, peak = 0, validated = 0;
+    const samples: { ttfbMs: number; elapsedMs: number; responseBytes: number }[] = [];
+    const result = await benchmarkHttpRoutes({
+      rounds: 5, warmup: 1, concurrency: 3, onSample: (sample) => samples.push(sample),
+      targets: [{ name: "stream", url: "https://example.test", init: async (iteration) => ({ headers: { "x-index": String(iteration) } }),
+        validate: (_response, body) => { expect(new TextDecoder().decode(body)).toBe("ok"); validated++; } }],
+      fetch: async (_url, init) => {
+        expect(new Headers(init?.headers).has("x-index")).toBe(true);
+        active++; peak = Math.max(peak, active);
+        return new Response(new ReadableStream({ start(controller) {
+          setTimeout(() => { controller.enqueue(new TextEncoder().encode("ok")); active--; controller.close(); }, 5);
+        } }));
+      },
+    });
+    expect(peak).toBe(3);
+    expect(active).toBe(0);
+    expect(validated).toBe(6);
+    expect(samples).toHaveLength(5);
+    expect(samples.every((sample) => sample.elapsedMs >= sample.ttfbMs && sample.responseBytes === 2)).toBe(true);
+    expect(result.results[0]?.responseBytes).toEqual({ p50: 2, p95: 2, max: 2 });
+    await expect(benchmarkHttpRoutes({ targets: [{ name: "bad", url: "https://example.test", validate: () => { throw new Error("wrong payload"); } }],
+      fetch: async () => new Response("wrong") })).rejects.toThrow("wrong payload");
+  });
+
 });
 
 function compilePlan(manifests: readonly Manifest[]): RuntimePlan {
