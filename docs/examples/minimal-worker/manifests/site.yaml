@@ -3,6 +3,7 @@ kind: Schema
 metadata:
   name: notes
 spec:
+  title: Notes
   schema:
     type: object
     required: [title]

@@ -5,7 +5,7 @@
   checkout.
 - To change or review this SDK, read [`CONTRIBUTING.md`](CONTRIBUTING.md) and
   the relevant accepted ADRs before editing.
-- To version, publish, tag, or fan out a release, additionally read the
+- To version, publish, or tag a release, additionally read the
   canonical [release skill](.agent/skills/mantle-release/SKILL.md). Do not
   release unless the user explicitly asks.
 
@@ -17,5 +17,5 @@ Repository safety gates:
   changes.
 
 `CLAUDE.md` is a compatibility pointer, not a second instruction authority.
-Generated applications receive their own version-matched instructions from
-[`aotter/mantle-starters`](https://github.com/aotter/mantle-starters).
+Applications project version-matched instructions from their installed Core
+package with `mantle skills`; see [direct authoring](docs/direct-authoring.md).

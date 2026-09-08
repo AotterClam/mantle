@@ -7,11 +7,11 @@
 3. **Bug or feature request** — file an [issue](https://github.com/aotter/mantle/issues/new/choose).
 4. **Security** — do **not** open a public issue. See [SECURITY.md](./SECURITY.md).
 
-## Help wanted on the starters monorepo?
+## Legacy Starters
 
-Starter source, provision bundles, and the local materializer live in
+The retired alpha.17 Starter source and bundles remain in
 [`aotter/mantle-starters`](https://github.com/aotter/mantle-starters). File
-issues there for bundle, materialization, overlay, and Kiwa source bugs.
+legacy issues there. New applications use [direct authoring](docs/direct-authoring.md).
 
 ## What we don't offer
 
