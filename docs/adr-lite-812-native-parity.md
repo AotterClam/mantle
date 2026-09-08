@@ -86,27 +86,27 @@ BENCH_LOCALES=en,fr,de BENCH_QUICK=1 pnpm bench:parity
 node scripts/summarize-wrangler-parity.mjs /path/to/report.json
 ```
 
-For remote acceptance, provision dedicated synthetic D1/KV (R2 when enabled), put a random
-32+ character BENCHMARK_KEY secret, deploy `parity-tail.ts` using the same D1,
-and attach it as a Tail consumer to `parity-worker.ts`. Create the sink table
-`CREATE TABLE __benchmark_records (id TEXT PRIMARY KEY, value TEXT NOT NULL)`
-in that synthetic database before sampling. Set BENCH_REMOTE_RECORDS=1
-on the producer. The sink persists only the selected diagnostic fields and native
-invocation timing, never request headers/body/URL or unrelated logs. The runner
-polls its own nonce records and deletes them after collection. Off-mode records
-still correlate native CPU so collector overhead can be measured independently.
+For remote acceptance, provision dedicated synthetic D1/KV (R2 when enabled),
+put a random 32+ character BENCHMARK_KEY secret, and deploy the fixture with
+BENCH_REMOTE_RECORDS=1. Run with BENCH_ORIGIN, BENCHMARK_KEY, BENCH_ACCOUNT_ID,
+BENCH_PROFILE_NAME, BENCH_BLOCK and BENCH_PLACEMENT in the process environment.
+The runner uses Wrangler's existing named-profile authentication to open the
+same native trace-v1 API used by `wrangler tail`. It retains only the nonce-
+correlated diagnostic fields and native CPU/wall timing in memory, never request
+headers/body/URL, credentials or unrelated logs. The tail session is deleted at
+completion. No paid Tail Worker, sink database writes or elevated log API token
+is needed. Off-mode records also correlate platform CPU to measure overhead.
 
-PHSU currently has no R2 subscription. Its remote run uses BENCH_SKIP_R2=1;
-R2 coverage comes from the native local matrix, with no remote R2 latency claim.
+PHSU has no R2 subscription; its remote run uses BENCH_SKIP_R2=1. R2 coverage
+comes from native workerd, with no remote R2 latency claim. A paid Tail Worker
+attempt was rejected by the provider, then replaced by the verified real-time API.
 
-Run with BENCH_ORIGIN, BENCHMARK_KEY, BENCH_BLOCK, and BENCH_PLACEMENT supplied
-through the process environment. Alternate off/on/off/on deployment blocks and
-BENCH_ORDER=reverse for the second pair. Record the actual platform placement
-status alongside request `cf-placement` (when supplied), ingress colo, deployment
-version, SDK/Wrangler/compatibility date, sampling window and errors. The runner
-forces private/no-store for origin timings, then separately requires a real public
-MISS followed by HIT with no invocation record. Local runs never invent HITs.
-A newly deployed Worker with existing D1 is labeled deployment-first, not empty DB.
+Alternate off/on/off/on deployment blocks and BENCH_ORDER=reverse for the second
+pair. Record actual placement status, request `cf-placement` when supplied,
+ingress colo, deployment version, SDK/Wrangler/compatibility date, sampling window
+and errors. Origin timings force private/no-store; a separate probe requires a
+real public MISS followed by HIT with no invocation record. Local runs never
+invent HITs. A deployed Worker with existing D1 is labeled deployment-first.
 
 Use `wrangler deploy --dry-run --outfile <bundle>` followed by
 `wrangler check startup --worker <bundle> --outfile <profile>` for module startup.
