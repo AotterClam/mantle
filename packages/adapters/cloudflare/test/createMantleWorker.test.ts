@@ -70,6 +70,54 @@ describe("createMantleWorker", () => {
     expect(assemblies).toBe(1);
   });
 
+  it("keeps static and plan-only routes independent of content preparation", async () => {
+    const db = new InMemoryDatabase();
+    const makeWorker = () => createMantleWorker<TestEnv>({
+      plan: compileTestPlan([]),
+      auth: () => stubAuth,
+      bindings: () => ({ db, adminAssets: { fetch: async () => new Response("shell") } }),
+      extend: () => ({ mount: ({ app }) => { app.get("/health", (c) => c.text("ok")); } }),
+    });
+    const env = testEnv();
+    const empty = makeWorker();
+    for (const path of ["/health", "/api/views", "/admin/sign-in", "/admin"]) {
+      expect((await fetchWorker(empty, path, env)).status).toBe(200);
+    }
+    expect(db.executions).toHaveLength(0);
+    expect(db.appliedMigrations.size).toBe(0);
+    await empty.getRuntime(env);
+    const before = db.executions.length;
+    const fresh = makeWorker();
+    for (const path of ["/health", "/api/views", "/admin/sign-in"]) {
+      expect((await fetchWorker(fresh, path, env)).status).toBe(200);
+    }
+    expect(db.executions).toHaveLength(before);
+    const migrations = vi.spyOn(db.migrations, "runAll");
+    await Promise.all([
+      fetchWorker(fresh, "/api/auth/probe", env),
+      fetchWorker(fresh, "/mcp/staff", env),
+      fresh.getRuntime(env),
+    ]);
+    expect(db.executions).toHaveLength(before + 1);
+    expect(migrations).not.toHaveBeenCalled();
+  });
+
+  it("prepares before a manifest route resolves database-backed credentials", async () => {
+    const db = new InMemoryDatabase();
+    const worker = createMantleWorker<TestEnv>({
+      plan: compileTestPlan(envProbeManifests()),
+      handlers: { envProbe: async () => ({ name: "ready" }) },
+      auth: () => ({ ...stubAuth, getSession: async () => {
+        expect(db.appliedMigrations.size).toBeGreaterThan(0);
+        return null;
+      } }),
+      bindings: () => ({ db }),
+    });
+    expect((await fetchWorker(worker, "/api/env-probe", testEnv(), {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    })).status).toBe(200);
+  });
+
   it("boots migrations before the first Auth request", async () => {
     const db = new InMemoryDatabase();
     const worker = createMantleWorker<TestEnv>({

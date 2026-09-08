@@ -281,3 +281,8 @@ adapter is a port-implementation exercise, not a runtime refactor.
 ## License
 
 Apache-2.0
+
+Pure extension routes do not await content preparation. Before an extension
+uses Mantle data or database-backed Auth, await its supplied `getRuntime()`
+(or `ref.get()`). Standard protected routes establish this readiness themselves;
+queue/scheduled handlers continue to use `worker.getRuntime(env)`.
