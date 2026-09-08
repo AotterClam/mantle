@@ -49,12 +49,10 @@ by the application.
 The package also installs `mantle` and `mantle-harness`:
 
 ```bash
-npx -y @aotter/mantle@alpha create <type> <directory>
 pnpm exec mantle generate
 pnpm exec mantle generate --check
 pnpm exec mantle skills
 pnpm exec mantle skills --check
-pnpm exec mantle update --ref <immutable-starter-ref>
 pnpm exec mantle-harness indexes --require-public
 pnpm exec mantle-harness http --base-url http://127.0.0.1:8787 --route page=/en/example
 ```
@@ -88,10 +86,9 @@ does not cache or retry. Dynamic and platform hosts can keep their own lifecycle
 use generated `bindMantle(runtime)`, or skip code generation and call
 `runtime.executeView({ view: "published-notes" })` directly.
 
-`mantle create` materializes one version-matched starter bundle into a new
-directory and stops: it installs nothing, initializes no repository, configures
-no auth, and deploys nothing. It resolves only the official immutable starter
-tag for the CLI's own version, and refuses to write into an existing path.
+Author the application directly using [the installed guide](docs/direct-authoring.md).
+The CLI has no scaffold/type picker; missing manifests fail without creating
+an application or a visitor home page.
 
 `mantle skills` copies every skill the installed package marks
 `projection: project` in its front matter into matching
@@ -102,15 +99,9 @@ receive identical bytes; `--check` detects drift without writing. An older
 project may also carry `.agent/skills/`, which is left untouched. Manifest
 generation never rewrites agent instructions.
 
-`mantle update` compares the recorded source bundle, a target bundle, and the
-local project, then writes `.mantle/update-report.json`. It never applies the
-diff. Configure `.mantle/features.json` `registry.bundleBaseUrl` with a URL
-containing `{ref}`, or pass `--bundle-base-url` for the alpha.63 bridge. The
-report carries the only supported metadata migration; review and apply it
-after porting selected upstream changes. Format-versioned bundles use the same
-strict renderer as `mantle create`; an invalid current launch state fails
-instead of producing a guessed diff. Older bundles without `formatVersion`
-retain a read-only compatibility renderer.
+SDK upgrades use the package manager and the version-matched update skill.
+See [0.1.2 migration](docs/migration-0.1.2.md) for removed bundle APIs and how to
+preserve legacy application source and provider configuration.
 
 ## Conventional Cloudflare Worker
 
@@ -189,16 +180,12 @@ internals or rebuilding Mantle's adapters.
 
 ## Getting started
 
-Give the [Mantle repo](https://github.com/aotter/mantle) to a coding agent or
-install its agent plugin, then ask it to create a site. The install skill picks
-a deterministic bundle from
-[`aotter/mantle-starters`](https://github.com/aotter/mantle-starters),
-materializes a local project, and verifies it before any provider work.
-
-[Mantle landing](https://mantle.tools) uses the same bundles and continues
-through private GitHub repo creation, Cloudflare deployment, and optional paid
-hosted auth. Generated repos project Core-owned `mantle:*` skills from their
-installed package for repo-local use.
+Use the installed install skill and [direct-authoring guide](docs/direct-authoring.md).
+The owner or agent writes the application's manifests, entry and configuration;
+`generate` compiles them and `skills` projects the version-matched instructions.
+The [minimal Worker reference](docs/examples/minimal-worker/README.md) is an
+executable example, not a scaffold command. Legacy Landing/Starters remain on
+alpha.17 and are not required by new applications.
 
 ## Agent marketplace install
 

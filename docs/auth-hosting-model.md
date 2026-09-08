@@ -7,8 +7,8 @@ basic login. The split is:
   run its own auth.
 - **Mantle's conventional Cloudflare adapter** runs the generated site's
   selected self-hosted or Mantle Platform hosted client configuration.
-- **Mantle starters** declare the mode and provider placeholders that landing
-  or the site owner completes.
+- **The application owner/host** declares the explicit auth mode and provider
+  configuration; legacy Landing/Starters remain on alpha.17.
 - **Mantle Platform** can sell hosted identity, provider setup, email,
   and billing convenience for site owners who do not want to operate
   those pieces.
@@ -120,7 +120,7 @@ GitHub OAuth token is still Landing-owned unless a separate token
 handoff design is introduced.
 
 The conventional hosted-auth client wiring belongs in Core's Cloudflare
-adapter. Starters declare its environment bindings; landing supplies an
+adapter. Applications declare its environment bindings; a provisioning host supplies an
 allocated client. A site can still replace Auth construction through
 `createMantleWorker({ auth })` when it needs a different curated identity
 design. Core continues to own the normalized manifest/runtime credential

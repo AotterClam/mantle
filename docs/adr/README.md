@@ -60,3 +60,5 @@ The rebuild's ADR-0011 (new) is the most load-bearing addition — the POC accum
 3. Sections: Status, Date, Context, Decision, Consequences, Alternatives, How to apply, Implementation status.
 4. Link from this README's table.
 5. Land it in a PR alongside (or before) the implementation it documents — ADR-as-design-artifact, not ADR-as-archaeology.
+
+- [ADR-0021: Direct authoring; retire Starter scaffolding](0021-retire-starter-scaffolding.md) — accepted for 0.1.2; supersedes ADR-0018.

@@ -6,7 +6,7 @@ post-launch feature for sites that use the Cloudflare adapter and need
 staff-managed images or files.
 
 Do not make R2 part of the Day 1 launch path. Cloudflare R2 setup may
-require billing or a credit card, so landing and the blank starter do not
+require billing or a credit card, so the minimal reference does not
 provision it by default.
 
 ## When To Enable

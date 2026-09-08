@@ -2,7 +2,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -86,10 +85,10 @@ try {
     tarballs.set(name, tarball);
   }
 
-  cpSync(project, consumer, {
-    recursive: true,
-    filter: (path) => !ignored(relative(project, path)),
-  });
+  const prefix = execFileSync("git", ["-C", project, "rev-parse", "--show-prefix"], { encoding: "utf8" }).trim().replace(/\/$/, "");
+  const archive = execFileSync("git", ["-C", project, "archive", prefix ? `HEAD:${prefix}` : "HEAD"], { maxBuffer: 64 * 1024 * 1024 });
+  mkdirSync(consumer);
+  execFileSync("tar", ["-x", "-C", consumer], { input: archive });
   addOverrides(join(consumer, "package.json"), tarballs);
   run("pnpm", ["install", "--no-frozen-lockfile"], consumer);
   const lockfile = readFileSync(join(consumer, "pnpm-lock.yaml"), "utf8");
@@ -120,6 +119,7 @@ try {
     core_sha: coreSha,
     consumer_sha: consumerSha,
     consumer: basename(project),
+    consumer_path: prefix || ".",
     package_version: version,
     run_artifact_sha256: Object.fromEntries(
       [...tarballs].map(([name, path]) => [name, sha256(path)]),
@@ -174,17 +174,6 @@ function addIfDirectory(found, name, path) {
   found.set(name, paths);
 }
 
-function ignored(path) {
-  return path.split("/").some((part) =>
-    part === ".git"
-    || part === "node_modules"
-    || part === "dist"
-    || part.startsWith(".wrangler")
-    || part === ".dev.vars"
-    || part === ".dev.vars.test"
-  );
-}
-
 function run(command, args, cwd, quiet = false) {
   execFileSync(command, args, {
     cwd,
@@ -195,8 +184,8 @@ function run(command, args, cwd, quiet = false) {
 
 function gitSha(directory) {
   const top = execFileSync("git", ["-C", directory, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-  if (realpathSync(top) !== realpathSync(directory)) {
-    throw new Error(`${directory} is not the root of its own git checkout`);
+  if (!isWithin(realpathSync(top), realpathSync(directory))) {
+    throw new Error(`${directory} is outside its git checkout`);
   }
   const status = execFileSync("git", ["-C", directory, "status", "--porcelain"], { encoding: "utf8" }).trim();
   if (status) throw new Error(`${directory} is not clean; refusing immutable SHA evidence`);

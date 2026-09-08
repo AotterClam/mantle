@@ -1,5 +1,8 @@
 # ADR-0018: Keep Core and public starters in separate repositories
 
+> Superseded for 0.1.2 by [ADR-0021](0021-retire-starter-scaffolding.md).
+> The contract below is retained as alpha.17 history, not current launch/release guidance.
+
 **Status:** Accepted for now; revisit only under the triggers below
 
 **Date:** 2026-08-02

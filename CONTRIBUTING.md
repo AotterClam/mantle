@@ -9,8 +9,8 @@ source, tests, package READMEs, and accepted ADRs define the current contract.
 Mantle Core is an embeddable manifest engine, not a site framework. A consumer
 may use only the parser and linker, bind Runtime to application-owned storage,
 add generated TypeScript bindings, or compose optional Web, Admin, UI, and
-platform adapters. The official Starter is an example and project bootstrap;
-it does not own Core's application shape.
+platform adapters. Applications are authored directly; a minimal reference consumer validates
+the package contract without owning Core's application shape.
 
 The sealed pipeline is:
 

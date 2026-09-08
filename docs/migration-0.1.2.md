@@ -1,4 +1,37 @@
-# Migrating from 0.1.0-alpha.7 to 0.1.2
+# Leaving the legacy alpha.17 launch line
+
+0.1.0-alpha.17 remains immutable and is the final version for existing Landing
+and Starters. Those repositories/tags/bundle URLs remain available. Staying on
+that version requires no migration. No stable 0.1.0 release is planned.
+
+The new line removes `mantle create`, the Starter bundle `mantle update`
+command, and `@aotter/mantle/provision`. There are no aliases or replacement
+scaffold commands. `generate`, `validate`, `emit-openapi` and `skills` remain.
+Generation and runtime Web rendering retain their existing responsibilities.
+
+To upgrade an existing application:
+
+1. Read its installed version, lockfile, entry, scripts and provider bindings;
+   keep unrelated work safe in the normal git workflow.
+2. Pin the selected SDK packages to the intended exact new release and update
+   the lockfile through the package manager. Review required peer upgrades.
+3. Remove scripts invoking the retired scaffolder/bundle updater. If application
+   code imports the provision renderer, remain on alpha.17 until that host's
+   provisioning design is migrated explicitly; do not replace it with a
+   handwritten remote-code loader.
+4. Retain application source and all Worker/D1/KV identity, origins, auth mode,
+   secrets and legacy `.mantle` metadata. Those files are not templates to
+   replace or evidence that new Starter tags must exist.
+5. Run the installed `mantle generate`, `generate --check`, `skills`,
+   `skills --check`, `validate`, and the project's TypeScript/tests. Test local
+   routes and configured authorization before considering deployment.
+
+A new project follows [direct authoring](direct-authoring.md). Templates and
+provider setup are not hidden inside `generate`. Future Builder/landing-next
+provisioning is a separate decision; this change does not migrate those hosts.
+
+## Earlier alpha.7 compatibility changes
+
 
 0.1.2 removes the temporary full-site compatibility stack. Mantle Core is now
 an embeddable parse → link → compile → prepare → bind pipeline; Web, Admin,

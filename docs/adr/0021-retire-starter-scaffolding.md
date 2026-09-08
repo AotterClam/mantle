@@ -1,4 +1,4 @@
-# ADR-0019: Author applications directly; retire Starter scaffolding
+# ADR-0021: Author applications directly; retire Starter scaffolding
 
 Status: Accepted by owner, 2026-09-08 (#786). Supersedes ADR-0018 for the 0.1.2 line.
 

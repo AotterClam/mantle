@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <a href="#start-in-one-command">Quick start</a>
+  <a href="#author-your-application">Quick start</a>
   &middot;
   <a href="#a-custom-mcp-server-without-building-the-server">Features</a>
   &middot;
@@ -51,43 +51,24 @@ Admin. Coding agents build with it; operation agents run it through governed
 tools. It stays inside your application, with your storage, auth, queues, and
 lifecycle.
 
-## Start in one command
+## Author your application
 
-```bash
-npx -y @aotter/mantle@alpha create transaction ./my-shop \
-  --brand "My Shop" \
-  --locales en,zh-TW
+Write the application's manifests, runtime entry and provider configuration,
+then use the installed SDK compiler:
+
+```sh
+pnpm exec mantle generate
+pnpm exec mantle validate
 ```
 
-Mantle requires Node.js 22+. If this command unexpectedly resolves `@aotter`
-from another registry, retry without changing your npm configuration:
+Follow [direct authoring](docs/direct-authoring.md), or give its version-matched
+install skill to your coding agent. The [minimal Worker reference](docs/examples/minimal-worker/README.md)
+shows a tested Cloudflare application without a visitor frontend. Other hosts
+can embed the same [manifest contract](#one-manifest-one-contract).
 
-```bash
-npx -y --@aotter:registry=https://registry.npmjs.org/ \
-  @aotter/mantle@alpha create transaction ./my-shop \
-  --brand "My Shop" \
-  --locales en,zh-TW
-```
-
-From there, your coding agent can take over by following the generated
-`AGENTS.md`.
-
-If you ran that command before an earlier release, `npx` reuses its cached copy
-and npm fails with `ERESOLVE`. `npm cache clean --force` clears it.
-
-Or, send your agent this prompt:
-
-```text
-Create a Mantle transaction site in ./my-shop for a small tea storefront in
-English and Traditional Chinese. Run
-npx -y @aotter/mantle@alpha create transaction ./my-shop --brand "My Shop" --locales en,zh-TW
-then follow the generated AGENTS.md to install it and get it running locally.
-```
-
-Types: `blank`, `presence`, `intake`, `publication`, `transaction`,
-`reservation` — see [the table below](#ready-to-use-starters). Prefer embedding
-Mantle in an application you already have? See the
-[manifest contract](#one-manifest-one-contract).
+The 0.1.2 line removes Starter scaffolding and the bundle updater. Existing
+Landing/Starters stay on immutable alpha.17; read the
+[migration notes](docs/migration-0.1.2.md) before upgrading.
 
 ## A custom MCP server, without building the server
 
@@ -110,22 +91,12 @@ and Markdown mirror in every locale:
 Mantle also emits `llms.txt`, sitemap, canonical links, hreflang, JSON-LD, and
 social metadata from the same published state.
 
-## Ready-to-use starters
+## Application patterns
 
-Start from a working product shape, then replace its model, copy, and handlers.
-
-| Starter | Pre-made logic | Good for |
-|---|---|---|
-| Blank | Headless Worker and Mantle wiring, with no product assumptions. | Existing apps and fully custom systems. |
-| Presence | Homepage, contact capture, optional Turnstile, and notification hook. | Company sites, portfolios, and landing pages. |
-| Intake | Branching multi-step intake, saved submissions, optional Turnstile, and notification hook. | RSVP, applications, onboarding, and lead qualification. |
-| Publication | Localized posts, publishing workflow, seeded homepage, and published-post View. | Blogs, newsrooms, magazines, and changelogs. |
-| Transaction | Localized catalog, cart, inventory reservation, order expiry, staff restocking, and simulated payment. | Small storefronts and commerce prototypes. |
-| Reservation | Public request capture and a recent-requests staff View, with manual confirmation. | Restaurants, appointments, tours, and events. |
-
-Create any of them with [`mantle create`](#start-in-one-command), or
-[browse the sources](https://github.com/aotter/mantle-starters). Membership and
-Community are coming soon and are not offered by `create`.
+Compose the four atoms for your actual business flow. Useful transaction
+coordination, idempotency and Queue/DO patterns are retained as
+[worked reference notes](docs/transaction-patterns.md), without a second
+launch product or a preset catalog.
 
 ## Publishing and operations in one Admin
 
@@ -319,13 +290,11 @@ The umbrella provides one `mantle` command set:
 
 | Command | Purpose |
 |---|---|
-| `mantle create <type> <dir>` | Materialize a version-matched starter into a new directory. |
 | `mantle generate` | Compile manifests into a sealed plan and typed runtime module. |
 | `mantle generate --check` | Fail without writing when generated code or optional Admin assets are stale. |
 | `mantle validate` | Validate manifests and handler-source references. |
 | `mantle emit-openapi` | Emit OpenAPI 3.1 from HTTP Triggers and View routes. |
 | `mantle skills` | Project version-matched Core skills into the consumer repository. |
-| `mantle update --ref <ref>` | Compare local work with an immutable provision bundle; apply nothing. |
 
 Run commands through the project's package manager, for example
 `pnpm exec mantle generate`.

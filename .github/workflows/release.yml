@@ -2,11 +2,11 @@
 #
 # Manually dispatched from the merged release commit. It owns the order:
 #
-#   source gates -> exact packed Starter -> Core tag -> candidate registries ->
-#   Starter tag -> clean-room create + Starter/Landing gates -> public channels -> release
+#   source + exact packed consumer -> Core tag -> verified candidate registries ->
+#   public-registry consumer -> public channels -> release
 #
 # Duplicate dispatches verify the same immutable state and skip existing
-# registry/tag/release mutations. Landing stays untouched by default.
+# registry/tag/release mutations. No downstream repository is mutated.
 
 name: release
 
@@ -17,11 +17,6 @@ on:
         description: 'Release version without leading v'
         required: true
         type: string
-      deploy_landing:
-        description: 'Dispatch the existing Landing release worker after all gates'
-        required: true
-        type: boolean
-        default: false
 
 concurrency:
   group: release-controller
@@ -38,8 +33,6 @@ jobs:
     # Single source of truth for the ten public packages, in dependency order.
     # Names are read from these package.json files during packing.
     env:
-      LANDING_SHA: ebcff1b02e299e607722ec1bcf085a1420afdf38
-      STARTER_SHA: bb8c23cf13fb5acd2922713d6be3c9b24bb917b8
       PKG_DIRS: >-
         packages/mantle-spec
         packages/mantle-admin-ui
@@ -168,22 +161,8 @@ jobs:
             if (failed) process.exit(1);
           "
 
-      - name: Check out the gated Starter source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: aotter/mantle-starters
-          ref: ${{ env.STARTER_SHA }}
-          path: .packed-consumer/mantle-starters
-          persist-credentials: false
-
-      - name: Verify exact packed Core in the gated Starter
-        run: >-
-          node scripts/check-packed-consumer.mjs
-          --project .packed-consumer/mantle-starters --
-          sh -euc 'pnpm --dir blank exec mantle skills;
-          pnpm --dir blank generate;
-          pnpm build:provision-bundle;
-          pnpm check:packed'
+      - name: Verify exact packed Core in the reference Worker
+        run: pnpm check:worker-consumer
 
       - name: Pack release tarballs
         run: |
@@ -209,19 +188,13 @@ jobs:
       - name: Verify release credentials
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          GH_TOKEN: ${{ secrets.RELEASE_FANOUT_TOKEN }}
           GPR_TOKEN: ${{ github.token }}
-          DEPLOY_LANDING: ${{ inputs.deploy_landing }}
           TAG_EXISTS: ${{ steps.ver.outputs.tag_exists }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
           [ -n "${NODE_AUTH_TOKEN:-}" ] || {
             echo "::error::NPM_TOKEN is required before creating an immutable tag"
-            exit 1
-          }
-          [ -n "${GH_TOKEN:-}" ] || {
-            echo "::error::RELEASE_FANOUT_TOKEN is required before creating an immutable tag"
             exit 1
           }
           NPMRC="$RUNNER_TEMP/npmjs-preflight.npmrc"
@@ -252,16 +225,6 @@ jobs:
             --registry https://registry.npmjs.org | \
             node -e "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{const access=JSON.parse(s);const denied=process.argv.slice(1).filter(p=>p in access&&access[p]!=='read-write');if(denied.length){console.error('NPM_TOKEN lacks read-write access: '+denied.join(', '));process.exit(1)}})" \
             $PKG_NAMES
-          [ "$(gh api repos/aotter/mantle-starters --jq '.permissions.push // false')" = true ] || {
-            echo "::error::RELEASE_FANOUT_TOKEN lacks Contents write on mantle-starters"
-            exit 1
-          }
-          if [ "$DEPLOY_LANDING" = true ]; then
-            [ "$(gh api repos/aotter/mantle-landing --jq '.permissions.push // false')" = true ] || {
-              echo "::error::RELEASE_FANOUT_TOKEN lacks Contents write on mantle-landing"
-              exit 1
-            }
-          fi
           assert_absent() {
             pkg="$1"
             npmrc="$2"
@@ -281,23 +244,11 @@ jobs:
               exit 1
             }
           }
-          STARTER_TAG_SHA=$(git ls-remote https://github.com/aotter/mantle-starters.git "refs/tags/v$VERSION" | awk '{print $1}')
           if [ "$TAG_EXISTS" = false ]; then
             for pkg in $PKG_NAMES; do
               assert_absent "$pkg" "$NPMRC" https://registry.npmjs.org npmjs
               assert_absent "$pkg" "$GPR_NPMRC" https://npm.pkg.github.com 'GitHub Packages'
             done
-            if [ -n "$STARTER_TAG_SHA" ]; then
-              echo "::error::mantle-starters v$VERSION already exists without the Core tag"
-              exit 1
-            fi
-          fi
-          if [ "$TAG_EXISTS" = false ]; then
-            REMOTE_STARTER_SHA=$(git ls-remote https://github.com/aotter/mantle-starters.git refs/heads/develop | awk '{print $1}')
-            [ "$REMOTE_STARTER_SHA" = "$STARTER_SHA" ] || {
-              echo "::error::Gated Starter $STARTER_SHA is no longer the develop tip $REMOTE_STARTER_SHA"
-              exit 1
-            }
           fi
 
       - name: Create immutable Core tag
@@ -444,96 +395,10 @@ jobs:
             rm -rf "$remote_work"
           done
 
-      - name: Dispatch Starter release worker
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_FANOUT_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh api "repos/${{ github.repository_owner }}/mantle-starters/dispatches" \
-            -f event_type=sdk-published \
-            -F "client_payload[sdk_version]=${{ steps.ver.outputs.version }}" \
-            -F "client_payload[core_sha]=${{ steps.ver.outputs.core_sha }}" \
-            -F "client_payload[starter_sha]=$STARTER_SHA"
-
-      - name: Wait for immutable Starter tag
-        id: starter
+      - name: Verify public-registry Core in the reference Worker
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          set -euo pipefail
-          for attempt in $(seq 1 120); do
-            SHA=$(git ls-remote https://github.com/aotter/mantle-starters.git "refs/tags/v$VERSION^{}" | awk '{print $1}')
-            if [ -z "$SHA" ]; then
-              SHA=$(git ls-remote https://github.com/aotter/mantle-starters.git "refs/tags/v$VERSION" | awk '{print $1}')
-            fi
-            if [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "Waiting for mantle-starters v$VERSION ($attempt/120)."
-            sleep 15
-          done
-          echo "::error::mantle-starters v$VERSION did not appear within 30 minutes"
-          exit 1
-
-      - name: Check out the released Starter
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: aotter/mantle-starters
-          ref: ${{ steps.starter.outputs.sha }}
-          path: .published-consumer/mantle-starters
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Validate released Starter provenance
-        working-directory: .published-consumer/mantle-starters
-        run: >-
-          node scripts/check-release-candidate.mjs
-          ${{ steps.starter.outputs.sha }}
-          ${{ steps.ver.outputs.version }}
-          ${{ steps.ver.outputs.core_sha }}
-          ${{ env.STARTER_SHA }}
-
-      - name: Test released Starter against the public registry
-        working-directory: .published-consumer/mantle-starters
-        run: |
-          set -euo pipefail
-          pnpm install --frozen-lockfile
-          pnpm check:starter-locks
-          pnpm check:provision-bundle
-          pnpm check:packed
-
-      - name: Create clean projects with the registry candidate
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          set -euo pipefail
-          ROOT=$(mktemp -d)
-          npx -y "@aotter/mantle@$VERSION" create blank "$ROOT/blank" --brand "Release Smoke"
-          npx -y "@aotter/mantle@$VERSION" create transaction "$ROOT/transaction" \
-            --brand "Release Smoke" --locales en,zh-TW
-          for PROJECT in blank transaction; do
-            corepack pnpm@9.15.0 --dir "$ROOT/$PROJECT" install --frozen-lockfile
-            corepack pnpm@9.15.0 --dir "$ROOT/$PROJECT" check
-          done
-
-      # Landing is private, and the job's own GITHUB_TOKEN cannot read another
-      # repository. Without an explicit cross-repository token this gate fails
-      # after the tag, the packages, and the Starter tag already exist.
-      - name: Check out the reviewed Landing consumer
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: aotter/mantle-landing
-          ref: ${{ env.LANDING_SHA }}
-          token: ${{ secrets.RELEASE_FANOUT_TOKEN }}
-          path: .published-consumer/mantle-landing
-          persist-credentials: false
-
-      - name: Test the exact candidate in Landing
-        run: >-
-          node scripts/check-packed-consumer.mjs
-          --project .published-consumer/mantle-landing --
-          pnpm check
+        run: node scripts/check-worker-consumer.mjs --registry "$VERSION"
 
       - name: Promote npmjs channel tags
         env:
@@ -633,12 +498,3 @@ jobs:
           else
             gh release create "$TAG" --generate-notes --title "$TAG" --prerelease
           fi
-
-      - name: Dispatch Landing release worker
-        if: ${{ inputs.deploy_landing }}
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_FANOUT_TOKEN }}
-        run: |
-          gh api "repos/${{ github.repository_owner }}/mantle-landing/dispatches" \
-            -f event_type=starters-released \
-            -F "client_payload[starters_version]=${{ steps.ver.outputs.version }}"

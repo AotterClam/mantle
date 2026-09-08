@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -19,6 +19,21 @@ afterEach(() => {
 });
 
 describe("mantle generate", () => {
+  it("rejects starter types and missing manifests without scaffolding", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mantle-no-scaffold-"));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      process.chdir(root);
+      expect(await runGenerate(["blank"], coreOnly)).toBe(2);
+      expect(await runGenerate([], coreOnly)).toBe(1);
+      expect(stderr.mock.calls.flat().join("")).toContain("MANIFEST_ROOT_NOT_FOUND");
+      expect(await readdir(root)).toEqual([]);
+    } finally {
+      process.chdir(originalCwd);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects an invalid type namespace", async () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     expect(await runGenerate(["--namespace", "not-valid"])).toBe(2);

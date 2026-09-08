@@ -8,8 +8,8 @@ Agent-readable skill briefs for consumers of `@aotter/mantle-*`. Discoverable by
 | [`media-gc`](media-gc/SKILL.md) | `mantle:media-gc`: audit or remove stale uncommitted public media objects with the connected Cloudflare API. |
 | [`plugin`](plugin/SKILL.md) | `mantle:plugin`: Core-owned marketplace workflow for plan-first capability installs across starters and adapters. |
 | [`theme`](theme/SKILL.md) | `mantle:theme`: Core-owned visual workflow. Reads project context but does not depend on starter-owned skill semantics. |
-| [`update`](update/SKILL.md) | `mantle:update`: Core-owned drift check workflow for SDK, starter snapshots, and plugin lockfiles. |
-| [`install`](install/SKILL.md) | User wants to create a local Mantle site from a deterministic starter bundle or continue an existing local / landing-generated project. |
+| [`update`](update/SKILL.md) | `mantle:update`: Core-owned drift check workflow for SDK dependencies, local skills, and plugin lockfiles. |
+| [`install`](install/SKILL.md) | User wants to create a local Mantle site by direct authoring or continue an existing local / landing-generated project. |
 | [`provision`](provision/SKILL.md) | User wants a local or landing-generated project shipped to Cloudflare with production auth and operator handoff. |
 
 The skills target Mantle's v0.1 grammar. The installed package version, not
@@ -28,8 +28,8 @@ enforces the columns below.
 | `develop` | existing project; manifest, runtime, handler, adapter, or MCP work | four-atom model; adapter neutrality; no direct D1/KV/Postgres writes; no committed secrets | performance harness; local MCP client; locale rules | project, plugin | — |
 | `plugin` | user wants an installable capability | plan before apply; lock entry is the removal manifest; delete only plugin-owned files and atoms | apply; remove | project, plugin | — |
 | `theme` | brand or visual direction in a generated project | repo-owned theme and UI contracts | — | project, plugin | — |
-| `update` | drift check against SDK, starter, or plugin locks | never blindly overwrite user-owned code | — | project, plugin | — |
-| `install` | new site, or opening an existing generated one | do not use the SDK checkout as the application; no push/deploy/provider config during cold start | create local project; continue existing project | plugin | Creates a new project; nothing to project into an existing one. |
+| `update` | SDK upgrade or plugin lock review | never blindly overwrite user-owned code | — | project, plugin | — |
+| `install` | new site, or opening an existing generated one | do not use the SDK checkout as the application; no push/deploy/provider config during cold start | author local project; continue existing project | plugin | Creates a new project; nothing to project into an existing one. |
 | `provision` | ship to Cloudflare and finish production auth | secrets never enter source or logs; explicit auth mode | hosted auth; self-managed auth | plugin | Platform-specific deploy that handles production secrets; opt-in only. |
 | `media-gc` | audit or remove stale uncommitted media objects | audit by default; confirm exact account, bucket, cutoff, and candidate digest; re-audit before applying; never prefix-delete; never print keys | apply | plugin | Destructive remote object deletion and Cloudflare-specific; opt-in only. |
 

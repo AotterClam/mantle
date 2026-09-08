@@ -30,13 +30,9 @@ version; never use `develop` branch docs for a versioned consumer project.
 
 ## Existing Examples
 
-Before inventing a Mantle pattern, inspect
-[`aotter/mantle-starters`](https://github.com/aotter/mantle-starters).
-Use a tag matching the installed Mantle version when available; use `develop`
-only for unreleased work. `blank/` shows the base application shape and
-`overlays/<type>/` contains working examples of manifests, handlers, routes,
-page seeds, and feature wiring. Copy the smallest matching pattern. Do not edit
-or copy generated `provision-bundles/*.json` by hand.
+Read installed `docs/direct-authoring.md`, `docs/examples/minimal-worker/`
+and `docs/transaction-patterns.md` before inventing a pattern. The reference
+consumer is test/documentation, not a Starter or a fixed application shape.
 
 Public rendering is opt-in consumer wiring: `mountPublicRoutes`, a
 `TemplateRegistry`, and a matching `publicPathResolver` must agree on the
@@ -57,8 +53,8 @@ pnpm exec mantle --help
 pnpm validate
 ```
 
-This CLI validates and derives artifacts from an existing materialized
-project; starter creation is owned by the provision-bundle flow.
+This CLI validates and derives artifacts from application-authored manifests.
+It does not create projects, business schemas or a visitor homepage.
 
 ## Core Model
 
@@ -216,8 +212,8 @@ cache.
 
 ## Rules
 
-- Put all content model changes in `manifests/site.yaml`; other manifest
-  filenames are rejected.
+- Keep content models in the configured manifest directory; its immediate
+  `.yaml` and `.yml` files are loaded together.
 - Use a generated overlay `seed.json` for the auth-free local first page when
   it is already imported by `src/web/content/*`.
 - Add TypeScript only for handlers, rendering, adapter wiring, or real behavior.

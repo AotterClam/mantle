@@ -27,10 +27,6 @@
       "types": "./dist/spec.d.ts",
       "import": "./dist/spec.js"
     },
-    "./provision": {
-      "types": "./dist/provision.d.ts",
-      "import": "./dist/provision.js"
-    },
     "./spec": {
       "types": "./dist/spec.d.ts",
       "import": "./dist/spec.js"
