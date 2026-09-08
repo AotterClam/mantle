@@ -39,7 +39,7 @@ jobs:
     # Names are read from these package.json files during packing.
     env:
       LANDING_SHA: ac38500aa8b0489265c82b95dc982352fcc38d69
-      STARTER_SHA: 8b3b913db3af028a639de75da2fb2f9d4c64d44c
+      STARTER_SHA: bb8c23cf13fb5acd2922713d6be3c9b24bb917b8
       PKG_DIRS: >-
         packages/mantle-spec
         packages/mantle-admin-ui
@@ -115,12 +115,8 @@ jobs:
           else
             echo "tag_exists=false" >> "$GITHUB_OUTPUT"
           fi
-          case "$VERSION" in
-            *-alpha*) NPM_TAG=alpha ;;
-            *-beta*)  NPM_TAG=beta ;;
-            *-rc*)    NPM_TAG=rc ;;
-            *)        NPM_TAG=latest ;;
-          esac
+          CHANNELS=$(node scripts/release-tag-order.mjs --channels "$VERSION")
+          NPM_TAG=${CHANNELS%% *}
           echo "npm_tag=$NPM_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Install
@@ -544,7 +540,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           CORE_SHA: ${{ steps.ver.outputs.core_sha }}
           VERSION: ${{ steps.ver.outputs.version }}
-          CHANNEL: ${{ steps.ver.outputs.npm_tag }}
         run: |
           set -euo pipefail
           NPMRC="$RUNNER_TEMP/npmjs-promote.npmrc"
@@ -576,10 +571,9 @@ jobs:
           }
 
           for pkg in $PKG_NAMES; do
-            promote "$pkg" "$CHANNEL"
-            if [[ "$CHANNEL" != latest ]]; then
-              promote "$pkg" latest
-            fi
+            for channel in $(node scripts/release-tag-order.mjs --channels "$VERSION"); do
+              promote "$pkg" "$channel"
+            done
           done
 
       - name: Promote GitHub Packages channel tags
@@ -587,7 +581,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ github.token }}
           CORE_SHA: ${{ steps.ver.outputs.core_sha }}
           VERSION: ${{ steps.ver.outputs.version }}
-          CHANNEL: ${{ steps.ver.outputs.npm_tag }}
         run: |
           set -euo pipefail
           NPMRC="$RUNNER_TEMP/github-packages-promote.npmrc"
@@ -622,10 +615,9 @@ jobs:
           }
 
           for pkg in $PKG_NAMES; do
-            promote "$pkg" "$CHANNEL"
-            if [[ "$CHANNEL" != latest ]]; then
-              promote "$pkg" latest
-            fi
+            for channel in $(node scripts/release-tag-order.mjs --channels "$VERSION"); do
+              promote "$pkg" "$channel"
+            done
           done
 
       - name: Create GitHub release
