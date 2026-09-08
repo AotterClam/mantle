@@ -723,16 +723,18 @@ describe("MCP View surface gating (#438)", () => {
     ] as Manifest[];
   }
 
-  function viewRef(auth: Auth = staffAuth()) {
+  function viewRef(auth: Auth = staffAuth(), useDefaultIcon = false) {
     return createMantleRuntimeRef({
       plan: compileTestPlan(viewManifests()),
       siteDefaults: {
         brand: "Example Shop",
         origin: "https://shop.example",
-        icons: [
-          { src: "/site-icon.png", mimeType: "image/png", sizes: ["64x64"] },
-          { src: "/site-icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
-        ],
+        ...(useDefaultIcon ? {} : {
+          icons: [
+            { src: "/site-icon.png", mimeType: "image/png", sizes: ["64x64"] },
+            { src: "/site-icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+          ],
+        }),
         media: { purposes: [postCoverPolicy()] },
       },
       bindings: {
@@ -798,6 +800,27 @@ describe("MCP View surface gating (#438)", () => {
         },
       ],
     });
+  });
+
+  it("projects the SDK icon into MCP metadata when the site does not override it", async () => {
+    const handler = createMcpApiHandler({
+      ref: viewRef(staffAuth(), true),
+      surface: "public",
+      resource: MCP_RESOURCE,
+    });
+    const response = await handler.fetch!(
+      jsonRpcReq("initialize"),
+      {},
+      props as unknown as ExecutionContext,
+    );
+    const body = (await response.json()) as {
+      result: { serverInfo: { icons: unknown[] } };
+    };
+    expect(body.result.serverInfo.icons).toEqual([{
+      src: "https://shop.example/_mantle/admin/favicon.svg",
+      mimeType: "image/svg+xml",
+      sizes: ["any"],
+    }]);
   });
 
   it("returns a standards-compatible 403 challenge when the MCP scope is missing", async () => {

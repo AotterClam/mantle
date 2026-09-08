@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SITE_ICONS,
   linkManifestSet,
   parseManifestSources,
   type Manifest,
@@ -321,6 +322,9 @@ describe("SQLite runtime composition", () => {
       { src: "/site-icon.png", mimeType: "image/png", sizes: ["64x64"] },
       { src: "/site-icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
     ]);
+
+    await createTestRuntime({ manifests: [], db, siteDefaults: {} });
+    expect((await repo.load()).icons).toEqual(DEFAULT_SITE_ICONS);
   });
 
   it("updates only provided editable site settings in one batch", async () => {

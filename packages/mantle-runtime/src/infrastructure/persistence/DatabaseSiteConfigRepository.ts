@@ -145,7 +145,7 @@ export class DatabaseSiteConfigRepository implements SiteConfigRepository {
     // nothing actually changed (#441).
     const syncedValues: Array<[string, string | undefined]> = [
       [KEYS.origin, defaults.origin && defaults.origin.length > 0 ? defaults.origin : undefined],
-      [KEYS.faviconUrl, defaults.icons ? JSON.stringify(defaults.icons) : undefined],
+      [KEYS.faviconUrl, JSON.stringify(defaults.icons ?? DEFAULT_SITE_ICONS)],
       [KEYS.locales, defaults.locales && defaults.locales.length > 0 ? defaults.locales.join(",") : undefined],
       [
         KEYS.mediaPurposes,
