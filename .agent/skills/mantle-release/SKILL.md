@@ -1,99 +1,39 @@
 # Mantle Release Skill
 
-Use this skill for a Mantle version bump, npm publish, Core or Starter tag,
-release recovery, or an explicit Landing release caused by Core.
+Use for explicit version bumps, publication, tagging and release recovery.
+Read fully before acting: docs/release-process.md, .github/release.yml,
+root/workspace package.json files, all four plugin manifests, marketplace
+manifests and .github/workflows/release.yml. Workflow edits require the Draft
+PR state table in the release process before editing code.
 
-## Required reading
+The sole controller is release.yml. Public versions/tags are immutable; never
+publish/tag manually. New Core releases have no Starter/Landing dispatch or
+checkout dependency. Alpha.17 remains the untouched legacy contract.
 
-Before changing a version or running the controller, read completely:
+Prepare a same-repository release PR: prove the new version/tag unused,
+preview native release notes and correct PR metadata, align package/plugin
+versions, inspect the packed docs/skills payload, run `pnpm check` and review
+its exact SHA. The reference consumer gate runs from packed packages outside
+workspace links. Merge into develop for alpha; stable/RC/beta main promotion
+remains explicit. Do not infer permission to publish from an implementation PR.
 
-- `docs/release-process.md`
-- `.github/release.yml`
-- root and workspace `package.json` files
-- all four agent plugin manifests
-- `.agents/plugins/marketplace.json`
-- `.github/workflows/release.yml`
+Dispatch the controller from the reviewed release merge with the version
+without v. Watch all gates, not only publication:
 
-Inspect the exact `mantle-starters` and `mantle-landing` commits pinned by the
-controller. Inspect Landing deployment configuration only when
-`deploy_landing=true` is explicitly in scope.
+1. Core tag resolves to that canonical merge.
+2. All ten npmjs artifacts exist with matching integrity and no workspace:*.
+3. GitHub Packages mirrors verify the same candidate.
+4. The reference Worker installs exact public packages, generates/types/checks
+   successfully and serves its declared HTTP route before channel promotion.
+5. Monotonic channel promotion and the GitHub prerelease/release succeed.
 
-When changing release automation, follow `docs/release-process.md` section
-"Changing release automation" before editing workflow code.
+For first stable acceptance (#826), give an agent only the version-matched
+consumer instructions and confirm a directly authored application reaches a
+running Worker. No SDK checkout or scaffold command is required.
 
-## Contract
-
-Public versions and tags are immutable. `.github/workflows/release.yml` is the
-only release controller. Do not push a release tag, invoke the Starter worker,
-or repair public state manually.
-
-For the current pre-v0.1 alpha cadence:
-
-- merge a reviewed release PR into `develop`;
-- dispatch the controller from that merge commit;
-- leave `deploy_landing=false` unless Landing was separately reviewed.
-
-The controller gates source and exact-packed Starter before tagging Core,
-publishes and verifies the registries, waits for the Starter's exact tagged
-merge, then tests the Starter, clean-created projects, and reviewed Landing
-consumer before public channel promotion and the Core GitHub Release. Starter
-does not promote `main`, backport, or dispatch Landing.
-
-## Prepare the release PR
-
-1. Fetch Core, Starter, and Landing remotes. Prove the intended version and
-   both tags are unused.
-2. Preview GitHub's generated notes since the previous tag. Correct PR metadata
-   and apply `skip-release-notes` to the release-only PR.
-3. Align every workspace package, plugin manifest, and marketplace ref to the
-   exact version.
-4. Pin the controller to the reviewed Starter and Landing `develop` commits,
-   and Core CI to the same Starter commit. Never substitute a branch or
-   floating tag.
-5. Audit downstream literals when an SDK type or closed enum changed.
-6. Run:
-
-   ```bash
-   pnpm check
-   node scripts/check-packed-consumer.mjs --self-test
-   ```
-
-   Before merge, run the workflow's exact packed-consumer commands against
-   both pinned checkouts: Starter's `pnpm check:packed` path and Landing's
-   `pnpm check` path.
-
-7. Inspect the diff and packed umbrella payload. Merge a same-repository PR
-   only after CI and review pass; direct-push commits are not releasable.
-
-## Run and watch
-
-Dispatch `release.yml` with the version without `v`. Watch until all of these
-are proven:
-
-1. Core tag resolves to the release merge commit.
-2. All ten npmjs artifacts exist with matching integrity and no `workspace:*`.
-3. GitHub Packages mirrors exist.
-4. Starter's canonical release PR passes the named gates, merges into
-   `develop`, and its tag resolves to that recorded merge.
-5. The frozen Starter tag passes the public-registry bundle gate.
-6. Clean Blank and multilingual Transaction projects install and pass checks.
-7. The reviewed Landing consumer passes against the exact candidate.
-8. The Core GitHub Release exists.
-9. Landing was dispatched only when the input was explicitly true.
-
-Then give a coding agent with no Mantle checkout only the generated instructions
-and confirm one project reaches a running Worker with the version-matched
-repo-local skills and intended runtime surface.
-
-## Recovery
-
-- Transient or partial run: rerun the same controller commit and version. Each
-  existing mutation must verify exact identity or fail; an older rerun must
-  never move a registry channel tag backward.
-- Wrong public artifact: fix forward with the next version. Never force-retag,
-  overwrite, or reuse an npm version.
-- Missing or stale Starter source: merge the Starter correction first, then
-  pin that exact SHA in the next Core release PR.
-- Closed/non-canonical Starter release PR, mismatched tag, advanced gated base,
-  or missing credential: stop and repair the explicit state. Do not guess a
-  fallback branch, commit, or tag.
+Transient/partial failures rerun the same controller commit/version. Verify
+existing state, preserve newer channels, and fail on identity disagreement.
+Wrong public artifacts require a new version; never overwrite or force-retag.
+Legacy alpha.17 recovery follows the controller and docs at its immutable tag,
+not the new release workflow. No legacy repositories or deployments are changed
+by a new Core release.

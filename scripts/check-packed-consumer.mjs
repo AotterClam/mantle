@@ -2,7 +2,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -41,7 +40,12 @@ if (args.length === 1 && args[0] === "--self-test" && command.length === 0) {
   if (!isWithin(source, join(source, "output")) || isWithin(source, join(tmpdir(), "output"))) {
     throw new Error("packed-consumer output boundary self-test failed");
   }
-  console.log("packed-consumer provenance self-test passed");
+  const archived = archiveProject(join(root, "docs/examples/minimal-worker"));
+  const entries = execFileSync("tar", ["-tf", "-"], { input: archived.bytes, encoding: "utf8" }).split("\n");
+  if (!entries.includes("package.json") || entries.some((entry) => entry.includes("node_modules/"))) {
+    throw new Error("packed-consumer committed subtree archive failed");
+  }
+  console.log("packed-consumer provenance and subtree self-test passed");
   process.exit(0);
 }
 if (help) {
@@ -86,10 +90,9 @@ try {
     tarballs.set(name, tarball);
   }
 
-  cpSync(project, consumer, {
-    recursive: true,
-    filter: (path) => !ignored(relative(project, path)),
-  });
+  const { prefix, bytes } = archiveProject(project);
+  mkdirSync(consumer);
+  execFileSync("tar", ["-x", "-C", consumer], { input: bytes });
   addOverrides(join(consumer, "package.json"), tarballs);
   run("pnpm", ["install", "--no-frozen-lockfile"], consumer);
   const lockfile = readFileSync(join(consumer, "pnpm-lock.yaml"), "utf8");
@@ -120,6 +123,7 @@ try {
     core_sha: coreSha,
     consumer_sha: consumerSha,
     consumer: basename(project),
+    consumer_path: prefix || ".",
     package_version: version,
     run_artifact_sha256: Object.fromEntries(
       [...tarballs].map(([name, path]) => [name, sha256(path)]),
@@ -174,17 +178,6 @@ function addIfDirectory(found, name, path) {
   found.set(name, paths);
 }
 
-function ignored(path) {
-  return path.split("/").some((part) =>
-    part === ".git"
-    || part === "node_modules"
-    || part === "dist"
-    || part.startsWith(".wrangler")
-    || part === ".dev.vars"
-    || part === ".dev.vars.test"
-  );
-}
-
 function run(command, args, cwd, quiet = false) {
   execFileSync(command, args, {
     cwd,
@@ -195,8 +188,8 @@ function run(command, args, cwd, quiet = false) {
 
 function gitSha(directory) {
   const top = execFileSync("git", ["-C", directory, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-  if (realpathSync(top) !== realpathSync(directory)) {
-    throw new Error(`${directory} is not the root of its own git checkout`);
+  if (!isWithin(realpathSync(top), realpathSync(directory))) {
+    throw new Error(`${directory} is outside its git checkout`);
   }
   const status = execFileSync("git", ["-C", directory, "status", "--porcelain"], { encoding: "utf8" }).trim();
   if (status) throw new Error(`${directory} is not clean; refusing immutable SHA evidence`);
@@ -212,4 +205,11 @@ function sha256(path) {
 function isWithin(parent, child) {
   const path = relative(parent, child);
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+function archiveProject(directory) {
+  const top = execFileSync("git", ["-C", directory, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  const prefix = execFileSync("git", ["-C", directory, "rev-parse", "--show-prefix"], { encoding: "utf8" }).trim().replace(/\/$/, "");
+  const bytes = execFileSync("git", ["-C", top, "archive", prefix ? `HEAD:${prefix}` : "HEAD"], { maxBuffer: 64 * 1024 * 1024 });
+  return { prefix, bytes };
 }

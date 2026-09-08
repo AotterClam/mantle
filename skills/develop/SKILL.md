@@ -30,24 +30,19 @@ version; never use `develop` branch docs for a versioned consumer project.
 
 ## Existing Examples
 
-Before inventing a Mantle pattern, inspect
-[`aotter/mantle-starters`](https://github.com/aotter/mantle-starters).
-Use a tag matching the installed Mantle version when available; use `develop`
-only for unreleased work. `blank/` shows the base application shape and
-`overlays/<type>/` contains working examples of manifests, handlers, routes,
-page seeds, and feature wiring. Copy the smallest matching pattern. Do not edit
-or copy generated `provision-bundles/*.json` by hand.
+Read installed `docs/direct-authoring.md`, `docs/examples/minimal-worker/`
+and `docs/transaction-patterns.md` before inventing a pattern. The reference
+consumer is test/documentation, not a Starter or a fixed application shape.
 
 Public rendering is opt-in consumer wiring: `mountPublicRoutes`, a
 `TemplateRegistry`, and a matching `publicPathResolver` must agree on the
-exposed collections. Do not auto-publish every Schema. Generated projects list
-their mounted URL surface in their own README.
+exposed collections. Do not auto-publish every Schema. Applications document their mounted URL surface in their own README.
 Import the registry and resolver from `@aotter/mantle/web`; Core runtime does
 not install public rendering by itself.
 
 ## Authoring CLI
 
-Use the project's scripts first; generated projects expose the shipping
+Use the project's scripts first; applications use the shipping
 `mantle` authoring CLI from `@aotter/mantle`. Ask the installed CLI for its
 command list instead of trusting one copied into prose — the surface is
 version-matched and changes between releases:
@@ -57,8 +52,8 @@ pnpm exec mantle --help
 pnpm validate
 ```
 
-This CLI validates and derives artifacts from an existing materialized
-project; starter creation is owned by the provision-bundle flow.
+This CLI validates and derives artifacts from application-authored manifests.
+It does not create projects, business schemas or a visitor homepage.
 
 ## Core Model
 
@@ -77,9 +72,9 @@ the atoms cannot express the behavior.
 
 ## Content Edits
 
-- A generated homepage reads its repo seed before auth. Change that seed for
-  local/static page copy; after auth, use Admin or Staff MCP for runtime-backed
-  content.
+- If a legacy homepage imports a repo seed, edit it for local/static copy.
+  Otherwise follow the actual frontend content source. Use Admin or Staff MCP
+  for runtime-backed content.
 - For a new submitted field, update the stored `Schema` and the public
   `Procedure.spec.input` before the seed/form. Keep public mutation inputs
   `additionalProperties: false`; otherwise JSON Schema's default may strip an
@@ -91,10 +86,10 @@ the atoms cannot express the behavior.
   archive, and every other status transition whose target is not `published`;
   do not use them for edit-only work.
 - When a form's fixed option values change, update the stored Schema and public
-  Procedure input `enum` together. Keep translated labels in the page seed;
+  Procedure input `enum` together. Keep translated labels in the frontend content source;
   Admin and Staff MCP derive their typed controls from the manifest values.
-- For a new section display property, update the content type and the `page`
-  Schema's `sections[].properties`; an undeclared property has no
+- If the application has a `page` Schema with sections, update its declared
+  section properties when adding display fields; an undeclared property has no
   runtime-backed Admin or Staff MCP path.
 - Update notification handlers when they need the new field. Test the stored
   entry, not only the HTTP `{ "ok": true }` response.
@@ -120,17 +115,17 @@ the atoms cannot express the behavior.
 
 ## Adapter Boundary
 
-The runtime is adapter-neutral. Required runtime ports are `DatabaseDriver`
-and `AssetServer`. Optional feature ports, such as `MediaStorage`
-or `DeferredHookDispatcher`, are enabled only when the current adapter wires
-them.
+The runtime is adapter-neutral. A `MantleStorageAdapter` prepares the compiled
+plan into semantic storage ports; `createMantleRuntime` binds that prepared
+storage and selected capabilities. Database drivers and asset serving belong
+to the host/optional composition. Follow the installed adapter guide.
 
 Do not assume Cloudflare unless the project imports `@aotter/mantle/cloudflare`
 or its adapter config is visible. A future Netlify adapter should satisfy the
 same Core workflow through its own ports and provider setup.
 
 Site code is a consumer of this abstraction. Use Manifests, runtime use cases,
-`entryReader`, and `siteConfig`; do not query Mantle-owned `entries` or
+`runtime.entries`, and optional `runtime.siteConfig`; do not query Mantle-owned `entries` or
 `site_config`, reach through deprecated `runtime.db`, copy generated-column
 names, or construct SDK KV keys. Cloudflare bindings belong only at the
 composition root. If a normal feature cannot be expressed through a
@@ -141,8 +136,8 @@ teaching the project Mantle internals.
 
 Conventional Cloudflare projects declare `MANTLE_AUTH_MODE=hosted` or
 `self-managed`; Core owns that standard Auth composition and rejects partial
-or mixed bindings. Preserve the explicit mode recorded in launch state and
-Worker config, keep provider secrets out of source, and do not infer a mode
+or mixed bindings. Preserve the explicit mode recorded in Worker config
+and any legacy launch state, keep provider secrets out of source, and do not infer a mode
 from whichever credentials happen to be present. A repo with an explicit
 `createMantleWorker({ auth })` override owns that custom composition; follow
 its handoff instead of replacing it with the conventional factory.
@@ -191,7 +186,7 @@ Use `pnpm dev` for local preview when the project provides it.
 ## Connect a Local MCP Client
 
 Start the project with `pnpm dev`, then use the exact local origin it prints.
-Generated Cloudflare projects normally expose:
+The conventional Cloudflare adapter exposes:
 
 - `http://localhost:8787/mcp` for public tools;
 - `http://localhost:8787/mcp/staff` for authenticated authoring tools.
@@ -216,8 +211,8 @@ cache.
 
 ## Rules
 
-- Put all content model changes in `manifests/site.yaml`; other manifest
-  filenames are rejected.
+- Keep content models in the configured manifest directory; its immediate
+  `.yaml` and `.yml` files are loaded together.
 - Use a generated overlay `seed.json` for the auth-free local first page when
   it is already imported by `src/web/content/*`.
 - Add TypeScript only for handlers, rendering, adapter wiring, or real behavior.

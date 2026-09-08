@@ -16,11 +16,13 @@ const root = resolve(import.meta.dirname, "..");
 const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 const temp = mkdtempSync(join(tmpdir(), "mantle-optional-packages-"));
 const artifacts = join(temp, "artifacts");
+const localState = mkdtempSync(join(root, "docs/examples/minimal-worker/.env.pack-check-"));
 const zod = `file:${realpathSync(join(root, "packages/mantle-runtime/node_modules/zod"))}`;
 const hono = `file:${realpathSync(join(root, "packages/adapters/cloudflare/node_modules/hono"))}`;
 
 try {
   mkdirSync(artifacts);
+  writeFileSync(join(localState, "sentinel"), "local test state must not be published");
   const tarballs = Object.fromEntries([
     ["@aotter/mantle", "packages/mantle"],
     ["@aotter/mantle-spec", "packages/mantle-spec"],
@@ -121,6 +123,16 @@ try {
     "@aotter/mantle-spec": `file:${tarballs["@aotter/mantle-spec"]}`,
     "@aotter/mantle-runtime": `file:${tarballs["@aotter/mantle-runtime"]}`,
   });
+  const umbrella = join(temp, "umbrella-core/node_modules/@aotter/mantle");
+  for (const doc of ["docs/direct-authoring.md", "docs/transaction-patterns.md", "docs/examples/minimal-worker/package.json"]) {
+    if (!existsSync(join(umbrella, doc))) throw new Error(`Packed authoring reference missing: ${doc}`);
+  }
+  const packedManifest = JSON.parse(readFileSync(join(umbrella, "package.json"), "utf8"));
+  if (packedManifest.exports["./provision"]) throw new Error("Retired provision export remains");
+  const payload = execFileSync("tar", ["-tf", tarballs["@aotter/mantle"]], { encoding: "utf8" });
+  if (/(?:^|\/)(?:node_modules|\.wrangler|\.env|\.dev\.vars)(?:[/.]|$)/m.test(payload)) {
+    throw new Error("Packed documentation contains local state");
+  }
   for (const optional of [
     "mantle-web",
     "mantle-admin",
@@ -221,6 +233,7 @@ try {
 
   console.log("Packed spec-only, Core-only, umbrella Core, Core+Web, Core+IndexedDB, and Core+Admin consumers passed.");
 } finally {
+  rmSync(localState, { recursive: true, force: true });
   rmSync(temp, { recursive: true, force: true });
 }
 

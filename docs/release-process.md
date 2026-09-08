@@ -1,39 +1,29 @@
 # Release process
 
-Mantle remains prerelease software until the first stable v0.1.2 gate closes.
-Published package versions, Git tags, GitHub releases, and Starter tags are
-immutable: repair a bad release with the next version, never by replacing
-public state.
+First stable targets 0.1.2 (#826). The last legacy Landing/Starter release is
+0.1.0-alpha.17. Its immutable artifacts and repositories remain available;
+recover that version with its tagged controller/docs. New releases have no
+Starter/Landing checkout, tag, dispatch, credential or deployment dependency.
 
-## Authority
+## Authority and state transitions
 
-`.github/workflows/release.yml` is the single release controller. Humans merge
-a reviewed release PR and dispatch that workflow from the merge commit. Humans
-do not push release tags or start downstream release workers directly.
+`.github/workflows/release.yml` is the only release controller. Humans merge
+a reviewed same-repository release PR, then explicitly dispatch that merge.
+No task implicitly authorizes publication; no manual package/tag writer exists.
 
-The controller owns this order:
+| State | Sole next writer | Retry / invariant |
+|---|---|---|
+| Reviewed source; unused version | Core source/packed-consumer gates, then immutable Core tag | Exact canonical merged PR SHA and version required |
+| Tag exists; registry candidates partial | Existing npm/GPR publication steps | Verify existing artifact identity; publish missing versions only |
+| Registry candidates verified | Public-registry reference consumer gate | No mutation; failure leaves public channels unchanged |
+| Consumer passes | Monotonic npm/GPR channel promotion | Same version is a no-op; older runs cannot move a channel backward |
+| Channels promoted/preserved newer | GitHub release step | Existing release identity or fail |
 
-```text
-Core source + exact-packed Starter gates
-  -> Core tag
-  -> npmjs + GitHub Packages candidate packages (`mantle-release`)
-  -> Starter release worker
-  -> immutable Starter tag
-  -> public-registry Starter gate
-  -> clean-create + reviewed Landing compatibility gates
-  -> npmjs + GitHub Packages public channel promotion
-  -> Core GitHub Release
-  -> optional Landing worker
-```
-
-The Starter worker owns only its repository transition: it prepares a release
-PR from the exact gated `develop` commit, waits for the named checks, merges
-that checked head atomically into `develop`, and tags the recorded merge
-commit. It does not promote `main`, backport, infer releases from commit text,
-or dispatch Landing.
-
-Landing is an explicit controller input and defaults off. A release that keeps
-`deploy_landing=false` does not mutate or deploy Landing.
+The public-registry gate uses a disposable copy of the directly authored
+`docs/examples/minimal-worker` reference, installs the exact candidate, then
+checks generation, skill projection, TypeScript and real Worker HTTP behavior.
+The same reference is gated against exact tarballs before Core tagging. It is
+a test/example, not a scaffold product or another repository release.
 
 ## Changing release automation
 
@@ -48,218 +38,67 @@ verdict expires when that SHA changes. After two patch rounds, a new
 foundational blocker returns to the state table and the user for a scope
 decision instead of starting another local redesign loop.
 
-For the candidate-to-channel transition, the controller follows this finite
-state table:
-
-| Durable state | Permitted next mutation | Re-run behavior | Public channel |
-|---|---|---|---|
-| Source gated; version unused | Create the immutable Core tag | Existing tag must match or the run fails | Unchanged |
-| Core tag exists; candidate packages incomplete | Publish and verify missing exact versions under `mantle-release` through each registry's sole publish step | Existing versions are verified and skipped | Unchanged |
-| Candidate packages verified; Starter tag absent | Dispatch the pinned Starter release and wait | The Starter worker resumes or reports its matching no-op | Unchanged |
-| Matching Starter tag exists | Validate its Core/base provenance; run the frozen Starter, clean-create, and Landing compatibility gates | Validation and gates repeat without mutation | Unchanged |
-| All downstream consumer gates pass | Promote npmjs and GitHub Packages channel tags monotonically | Same version is a no-op; an older run preserves a newer tag | Candidate or newer version |
-| Channels promoted or preserved newer | Create the Core GitHub Release | Existing matching release is a no-op | Candidate or newer version |
-| Core GitHub Release exists | Dispatch Landing only when explicitly enabled | Landing remains untouched by default | Candidate or newer version |
-
-Invariants:
-
-- immutable package versions and Core/Starter tags must keep the requested
-  version, Core SHA, and pinned Starter SHA identity;
-- public channel tags cannot move until the released Starter, clean-create, and
-  reviewed Landing compatibility gates pass;
-- channel updates use the controller's monotonic promotion boundary, so an
-  older re-run cannot move a channel backward;
-- the candidate version may be fetched explicitly or through the temporary
-  `mantle-release` tag before promotion, but is not the public channel default.
-
-Non-goals: this transition does not change Starter worker ownership, add
-rollback or unpublish behavior, or deploy Landing unless
-`deploy_landing=true`.
+Invariants: immutable versions/tags retain their identity; registry integrity
+and the published-consumer gate precede public channel promotion; retries
+cannot move channels backward. No downstream mutation, unpublish or rollback
+is introduced. The runnable release-order check guards these transitions.
 
 ## Branches and channels
 
-- Feature and release PRs target `develop`.
-- Alpha prereleases before stable v0.1.0 release directly from the merged
-  `develop` release commit.
-- Beta, RC, and stable promotion to `main` remains a deliberate human decision;
-  it is not part of the alpha controller.
-- Alpha, beta, and RC GitHub releases are prereleases.
-- npm dist-tags follow the suffix: `alpha`, `beta`, `rc`, or `latest` for
-  stable versions.
-- During the legacy `0.0.x-alpha` cadence, `latest` follows the current alpha.
-  The final `0.1.0-alpha.N` candidates advance only `alpha`; `latest` advances to the first stable `0.1.2` after its gate passes.
-  Do not roll back an existing legacy `latest` value.
+- Alpha releases use the reviewed develop merge. Beta/RC/stable use main after
+  explicit promotion; first stable acceptance is tracked by #826.
+- Alpha/beta/RC GitHub releases are prereleases; their npm tags match suffixes.
+- Stable publishes latest. Final 0.1.0 alphas only advance alpha, preserving
+  existing legacy latest. Historic 0.0 alpha behavior remains recoverable.
 
-## Release PR
+## Prepare and run
 
-1. Fetch Core and Starter remotes and choose the next unused version.
-2. Preview GitHub's generated notes for the merged commits since the previous
-   tag. Correct PR titles and labels before release; do not duplicate the notes
-   in `CHANGELOG.md`. Label the release-only PR `skip-release-notes`.
-3. Set that exact version in every workspace package and in all four agent
-   plugin manifests. Set `.agents/plugins/marketplace.json` to the immutable
-   `v<version>` ref.
-4. Pin the controller to the exact reviewed `mantle-starters/develop` and
-   `mantle-landing/develop` commits intended for this release, and Core CI to
-   the same Starter commit. Do not use a branch, latest tag, or inferred
-   fallback.
-5. If an SDK type changed, audit downstream literal constructors and exhaustive
-   switches before publication. CI in Core cannot prove downstream source
-   compatibility by itself.
-6. Run `pnpm check`, inspect the packed umbrella package, and run the exact
-   packed-consumer gates against both pinned Starter and Landing commits before
-   tagging. Review and merge a same-repository PR into `develop`; the
-   controller rejects a direct-push release commit.
+1. Fetch Core refs, prove the version and tag unused. Preview GitHub generated
+   notes since the previous tag; correct PR metadata and label release-only
+   PRs skip-release-notes. Do not duplicate release entries in CHANGELOG.md.
+2. Align every workspace package, plugin and marketplace ref to the version.
+3. Review API compatibility and migration instructions for actual consumers.
+   Frozen legacy consumers stay on alpha.17; do not make them follow new Core.
+4. Run `pnpm check`, including exact packed Worker, optional products, Bun,
+   Vercel, skills, release invariants, types and tests. Inspect the umbrella
+   docs/skills payload: no workspace dependencies, secrets or local state.
+5. Freeze the PR head for self review; CI must pass before merge. Dispatch
+   release.yml from that merge with `version` (without v). It refuses an
+   untagged source that is no longer the expected branch tip.
 
-Preview the native notes before merging the release PR:
+The ten public packages remain in dependency order:
 
-```bash
-gh api --method POST repos/aotter/mantle/releases/generate-notes \
-  -f tag_name=vX.Y.Z \
-  -f target_commitish="$(git rev-parse origin/develop)" \
-  -f previous_tag_name=vPREVIOUS \
-  --jq .body
-```
+1. @aotter/mantle-spec
+2. @aotter/mantle-admin-ui
+3. @aotter/mantle-runtime
+4. @aotter/mantle-indexeddb
+5. @aotter/mantle-web
+6. @aotter/mantle-admin
+7. @aotter/mantle-bun
+8. @aotter/mantle-vercel
+9. @aotter/mantle-cloudflare
+10. @aotter/mantle
 
-The ten public packages publish in dependency order:
+## Credentials and verification
 
-1. `@aotter/mantle-spec`
-2. `@aotter/mantle-admin-ui`
-3. `@aotter/mantle-runtime`
-4. `@aotter/mantle-indexeddb`
-5. `@aotter/mantle-web`
-6. `@aotter/mantle-admin`
-7. `@aotter/mantle-bun`
-8. `@aotter/mantle-vercel`
-9. `@aotter/mantle-cloudflare`
-10. `@aotter/mantle`
+Core needs NPM_TOKEN for npmjs. Its job-scoped GITHUB_TOKEN creates the Core
+tag/release and mirrors GitHub Packages. No cross-repository fanout token is
+needed. Before tagging, verify credentials and new-version absence on both
+registries. Existing artifacts on retry must have matching integrity.
 
-The umbrella package must contain its version-matched `docs/` and `skills/`
-payload. No tarball may contain `workspace:*` dependencies, secrets, local
-state, or workspace-only files. Starter content is still authored and released
-from the versioned `mantle-starters` repository — Core owns no starter source.
-Core's umbrella CLI is the canonical consumer of that release: `mantle create`
-resolves the official immutable `v${packageVersion}` starter tag and renders it
-through Core's shared provision module. A published Core version
-therefore requires the matching starter tag to exist; see
-[ADR-0018](adr/0018-core-starters-repository-boundary.md).
+Completion requires the Core tag SHA, all ten npmjs/GPR packages, exact
+integrity, no workspace dependencies, a passing public-registry Worker gate,
+correct channel tags and the GitHub release. Retain run links and gate evidence.
+This does not prove stable production soak or upgrade safety; #826 owns those
+acceptance requirements. A first-stable agent acceptance uses only the
+version-matched authoring instructions, not an SDK checkout or generated site.
 
-## Run the controller
+## Recovery
 
-Dispatch `.github/workflows/release.yml` from the merged release commit with:
-
-- `version`: the version without the leading `v`.
-- `deploy_landing`: `false` unless Landing was separately reviewed and is
-  intentionally part of this release.
-
-Before creating the Core tag, the controller proves:
-
-- the requested version matches every package, plugin, and marketplace ref;
-- `pnpm check` passes;
-- packed Core passes in the exact pinned Starter source;
-- all ten release tarballs exist;
-- npm and cross-repository credentials are present and readable;
-- a fresh version is unused across npmjs, GitHub Packages, and Starter tags;
-- the pinned Starter commit is still the remote `develop` tip.
-
-After candidate publication under `mantle-release`, it compares each public
-registry integrity value with the locally packed tarball, rejects leaked
-`workspace:*` dependencies, waits for the Starter tag, checks that tag's exact
-Core/base provenance, installs its frozen locks from the public registry, and
-reruns the Starter bundle gates. It then creates clean Blank and multilingual
-Transaction projects through the registry candidate, frozen-installs and checks
-both, and runs the reviewed Landing consumer against the exact packed candidate.
-Only then does it promote the public npmjs and GitHub Packages channel tags and
-create the Core GitHub Release.
-
-## Idempotency and recovery
-
-The global controller lock serializes releases. Re-running the same release is
-supported:
-
-- an existing Core tag must resolve to the same controller commit;
-- existing npm and GitHub Packages versions are verified and skipped;
-- channel dist-tags are never moved backward by an older rerun;
-- a duplicate Starter dispatch resumes its open/merged state or reports a
-  tagged no-op;
-- an existing GitHub Release is a no-op.
-
-If source or immutable state disagrees, the workflow fails instead of guessing.
-Fix source and publish the next version when public state is wrong. Re-run the
-same controller only for a transient failure or a verified partial transition.
-Never force-retag or republish an existing version.
-
-## Credentials
-
-Core repository secrets:
-
-| Secret | Minimum purpose |
-|---|---|
-| `NPM_TOKEN` | Publish the ten `@aotter/*` packages on npmjs. |
-| `RELEASE_FANOUT_TOKEN` | Read and dispatch `aotter/mantle-starters`; also read and dispatch `aotter/mantle-landing` only when Landing is enabled. |
-
-Core's job-scoped `GITHUB_TOKEN` creates the Core tag and release and mirrors
-packages to GitHub Packages. Starter's job-scoped token pushes its generated
-branch, checked merge, and tag; its `RELEASE_FANOUT_TOKEN` is used only to
-create the canonical same-repository PR. Prefer separate fine-grained tokens
-or a GitHub App when practical; do not grant organization-wide repository
-access for this flow.
-
-## Post-release verification
-
-Completion requires evidence for both repositories, not only a green publish
-step:
-
-```bash
-gh -R aotter/mantle release view vX.Y.Z
-gh api repos/aotter/mantle-starters/git/ref/tags/vX.Y.Z
-
-for p in \
-  @aotter/mantle-spec \
-  @aotter/mantle-admin-ui \
-  @aotter/mantle-runtime \
-  @aotter/mantle-indexeddb \
-  @aotter/mantle-web \
-  @aotter/mantle-admin \
-  @aotter/mantle-bun \
-  @aotter/mantle-vercel \
-  @aotter/mantle-cloudflare \
-  @aotter/mantle; do
-  npm view "$p@X.Y.Z" version dist.integrity dependencies --json
-done
-```
-
-The controller already creates and checks clean Blank and multilingual
-Transaction projects. For 0.1.2 release acceptance, give a coding agent with no
-Mantle checkout or repository knowledge only the generated instructions and
-confirm it reaches a running Worker. This is one manual clean-room acceptance,
-not a nondeterministic CI framework. Confirm the generated project contains
-version-matched repo-local Mantle skills and the expected typed runtime surface.
-`blank` remains headless and contains no Kiwa; a typed Starter revision may
-retain its replaceable offline UI palette, but runtime code must not import it.
-
-If `deploy_landing=false`, also verify that no Landing release dispatch or
-deployment was started.
-
-## Fix-forward policy
-
-- Broken public package or Starter bundle: publish the next alpha and explain
-  the re-spin in the fix PR and generated GitHub Release notes.
-- Use `npm deprecate` to steer consumers away from a broken version.
-- Unpublish only for secrets, private files, or similarly severe exposure;
-  npm versions cannot be reused and registry metadata may remain unavailable
-  during the unpublish cooldown.
-- A cross-cutting rename must include an explicit infrastructure-config diff
-  and live smoke test. CI success does not prove renamed Worker, D1, KV, route,
-  or secret bindings are correct.
-
-## Final legacy release and next stable target
-
-Owner decision (2026-09-08): `0.1.0-alpha.17` closes the legacy Landing/Starter
-product line. Pin the existing Landing packages, Core deployment SHA and Starter
-refs to that release, and retain immutable Starter tags for existing consumers.
-No stable `0.1.0` release is planned. Issue #621 is superseded, not a claim that
-its former production soak passed. First stable targets milestone `0.1.2`, with
-new acceptance covering identity isolation, safe updates and retained production
-stability after the breaking architecture is settled. Retiring Starter launch
-is tracked by #786; the separate landing-next repository is out of this release.
+Rerun the same controller commit/version for a transient or verified partial
+transition. Existing tags/artifacts must match; newer channels stay put. Fail
+on identity disagreement instead of guessing. A wrong public artifact needs
+a new version; never force-retag, overwrite or reuse a published version.
+Unpublish is reserved for actual secret/private-file exposure, never routine
+fixes. Infrastructure renames require their explicit config diff and live
+smoke; CI alone cannot prove provider identity.

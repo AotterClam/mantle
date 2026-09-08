@@ -1,6 +1,6 @@
 ---
 name: theme
-description: Apply brand and visual direction in a generated Mantle project using its repo-owned theme and UI contracts.
+description: Apply brand and visual direction in a Mantle application using its repo-owned theme and UI contracts.
 metadata:
   source: "@aotter/mantle"
   sourcePath: skills/theme/SKILL.md
@@ -10,8 +10,8 @@ metadata:
 
 # Mantle Theme
 
-Theme work is project-owned source editing. Starters may ship UI files,
-tokens, or recipes, but the skill contract is Core-owned.
+Theme work is project-owned source editing. Use the actual frontend and its
+tokens/recipes; Core does not install a default home page or UI tree.
 
 ## First Read
 
@@ -23,12 +23,12 @@ tokens, or recipes, but the skill contract is Core-owned.
 
 ## Ownership
 
-- `styles/globals.css` is the token contract. Start a whole-site reskin with
-  its `:root` and `.dark` values; runtime components inherit those variables.
+- Use the actual token contract (for example `styles/globals.css`) when present.
+  Check its light/dark values before changing components.
 - `components/` is the runtime-facing component surface when present.
   `src/web/` is project-owned composition; put new sections there.
 - `public/site-icon.svg` and `public/site-icon.png` are one site identity.
-  Keep both listed in `src/mantle/config.ts > siteDefaults.icons`: PNG first as
+  Keep both listed in the actual entry/config `siteDefaults.icons`: PNG first as
   the 64x64 compatibility rendition, then SVG as the editable `any` size source.
   The same list drives browser favicons, Admin chrome, and MCP
   `serverInfo.icons`; do not edit generated files under `public/_mantle/`.

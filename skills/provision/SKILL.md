@@ -16,8 +16,9 @@ user asks to create remote resources or ship production.
 
 ## Source of Truth
 
-1. Read `.mantle/launch-state.json`, `.mantle/handoff.md`, `wrangler.toml`,
-   and the current git remotes.
+1. Read the actual provider config (`wrangler.jsonc` or `wrangler.toml`),
+   application entry and git remotes. Read legacy `.mantle/launch-state.json`
+   and `.mantle/handoff.md` only when present; do not create them as prerequisites.
 2. Read installed `@aotter/mantle*` versions from `package.json`.
 3. Use matching embedded docs under `node_modules/@aotter/mantle/docs/`.
 4. Never infer provider authority from launch state. Confirm the active GitHub

@@ -2,12 +2,16 @@
 
 Cloudflare Workers adapter for mantle.
 
+Documentation paths beginning with `node_modules/` below are relative to the
+application root. Shared guides ship in the same-version `@aotter/mantle`
+package; in an SDK checkout, those guides live under the root `docs/`.
+
 This package mounts the runtime on Hono, implements the runtime ports against
 Cloudflare D1 / KV / Workers assets, and owns curated identity/session wiring
 plus MCP OAuth/CIMD. Legacy DCR remains a bounded compatibility path.
 
 This package is prerelease software. Its `package.json` is the exact version
-authority; the API surface may change until `v0.1.0`.
+authority; the API surface may change until the first stable `0.1.2` release.
 
 ## Conventional Worker Facade
 
@@ -15,7 +19,7 @@ authority; the API surface may change until `v0.1.0`.
 adapter's existing Auth, binding, Hono, OAuth and MCP primitives once per
 isolate; `extend` may add application routes but cannot replace Core-owned
 paths. The canonical contract and reserved path list live in the umbrella
-package's [Conventional Cloudflare Worker](../../mantle/README.md#conventional-cloudflare-worker)
+package's `node_modules/@aotter/mantle/README.md` (“Conventional Cloudflare Worker”)
 section.
 
 The returned facade also exposes `getRuntime(env)`. Site-owned Queue and
@@ -58,7 +62,7 @@ createMantleWorker({
 ```
 
 When the conventional lifecycle really does not fit, copy the
-[low-level composition fixture](../../../docs/cloudflare-low-level-composition.md).
+`node_modules/@aotter/mantle/docs/cloudflare-low-level-composition.md`.
 It uses the same public bindings, Auth, runtime, OAuth/MCP, cache and error
 primitives as the facade, and states which code becomes application-owned.
 
@@ -67,7 +71,7 @@ primitives as the facade, and states which code becomes application-owned.
 `createAuth()` exposes curated Better Auth configuration fields, not a
 generic Better Auth passthrough. The hosted-auth and self-hosted-auth
 product boundary is documented in
-[`docs/auth-hosting-model.md`](../../../docs/auth-hosting-model.md).
+`node_modules/@aotter/mantle/docs/auth-hosting-model.md`.
 
 For trusted first-party apps that share one parent domain, configure
 same-parent-domain cookies explicitly:
@@ -101,7 +105,7 @@ and MCP OAuth callers into the same runtime auth context. Manifest
 every REST or MCP call.
 
 Core does not create credential or payment tables. See the shipped
-[API and MCP authorization guide](../../../docs/api-mcp-authorization.md) for
+`node_modules/@aotter/mantle/docs/api-mcp-authorization.md` for
 the exact resolver contract, OAuth resource helpers, manifest examples,
 status behavior, OpenAPI reflection, and runnable integration fixture.
 
@@ -176,7 +180,7 @@ Cache-Tag. Publishing-content and site-setting mutations purge that tag through
 the native Workers cache API; immutable assets and operational records stay
 outside the purge boundary. Workers Cache stores only responses that still
 satisfy the anonymous policy, and remains version-local. See the
-[adapter implementation guide](../../../docs/adapter-guide.md#http-cache-contract).
+`node_modules/@aotter/mantle/docs/adapter-guide.md` (“HTTP cache contract”).
 
 ## Optional R2 Media Uploads
 
@@ -184,7 +188,7 @@ R2-backed staff media uploads are adapter-specific post-launch work, not part
 of the Core SDK skill contract or Day 1 landing path. Use the Cloudflare recipe
 only when a site actually needs staff-managed images or files:
 
-[Cloudflare R2 media uploads](../../../docs/media-uploads.md)
+`node_modules/@aotter/mantle/docs/media-uploads.md`
 
 ## Optional deferred lifecycle hooks
 
@@ -199,4 +203,4 @@ and maps failures to per-message retry/DLQ behavior.
 Producer/consumer bindings, Worker export, idempotent D1/upstream examples,
 site-queue multiplexing, verification, and the legacy-envelope drain step are
 in the shipped
-[deferred lifecycle Queue guide](../../../docs/deferred-lifecycle-queues.md).
+`node_modules/@aotter/mantle/docs/deferred-lifecycle-queues.md`.

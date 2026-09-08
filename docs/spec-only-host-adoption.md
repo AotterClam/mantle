@@ -180,5 +180,5 @@ be presented as **"Mantle certified"** or as a guarantee of data migration,
 release reliability, security, shared UI components or full Runtime support.
 
 This proposal uses the optional composition in ADR-0019 and respects
-[ADR-0018](adr/0018-core-starters-repository-boundary.md): the website remains
+[ADR-0021](adr/0021-retire-starter-scaffolding.md): the website remains
 an external consumer; the SDK receives only documentation and synthetic tests.

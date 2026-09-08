@@ -1,6 +1,6 @@
 ---
 name: install
-description: Start a new Mantle site locally from a deterministic starter bundle, or orient and continue an existing local or Mantle landing project. Use when the user gives a Mantle repository URL and asks to try or build with it, invokes the Mantle install skill, wants a new Mantle site, or opens an existing generated site.
+description: Author a new Mantle application directly from version-matched SDK docs, or continue an existing project. Use when asked to install Mantle, build a Mantle application, or open a Mantle repository.
 metadata:
   source: "@aotter/mantle"
   sourcePath: skills/install/SKILL.md
@@ -11,160 +11,68 @@ metadata:
 
 # Mantle Install
 
-Route by the working directory:
+Mantle is an embeddable manifest engine. The application owns its source and
+provider configuration. There is no Starter/type picker or `mantle create`.
+Do not use the SDK checkout as the application, copy an old Starter tree, or
+turn `generate` into implicit scaffolding.
 
-- If it already contains `.mantle/launch-state.json` or depends on
-  `@aotter/mantle`, continue the existing project.
-- Otherwise create a new local project from a deterministic provision bundle.
-  Do not use the Mantle SDK checkout as the application.
+## New application
 
-Mantle landing uses the same bundles but continues through GitHub, Cloudflare,
-and optional paid hosted auth. Use landing only when the user wants that
-hosted provider flow.
+1. Determine the actual host and required surfaces from the request. Reuse an
+   existing application when available; otherwise work in its own directory.
+   Do not assume Cloudflare, public HTML or Admin is required. Check Node 22+
+   and pnpm 9+ for these SDK examples.
+2. Choose the requested exact SDK version, or resolve the intended release
+   channel once. Pin all selected `@aotter/mantle*` dependencies to that same
+   version. Install only the adapter/optional packages the application needs.
+   If a global scope registry overrides public npmjs, use a project-owned
+   `.npmrc` with `@aotter:registry=https://registry.npmjs.org/`.
+3. Read the installed `node_modules/@aotter/mantle/docs/direct-authoring.md`.
+   The version-matched `docs/examples/minimal-worker/` is a runnable Cloudflare
+   reference, not a template to install wholesale. Other hosts use the embedded
+   adapter guides. Author package scripts, manifests, entry and configuration
+   for the user's requirements. No default notes model, home page, icon,
+   launch metadata or frontend is required.
+4. Compile and verify using the application's commands. The fundamental CLI
+   sequence is:
 
-## Create a Local Project
-
-1. Infer the closest starter from the user's request. Ask only when two choices
-   would materially change the result.
-
-| Intent | Type |
-|---|---|
-| API/MCP backend or empty base | `blank` |
-| Small public or company site | `presence` |
-| Form, application, or submission flow | `intake` |
-| Blog, docs, posts, or editorial site | `publication` |
-| Catalog or order intent | `transaction` |
-| Booking or request intent | `reservation` |
-
-Community and membership types are not released; `create` refuses them. Build
-those on `blank` or the closest released type.
-
-2. Choose a target directory outside both Mantle repositories; its name
-   becomes the project slug. Derive a brand, one-sentence description, and
-   locales from the user's prompt. Require Node 22+ and pnpm 9+; check
-   `node --version` and `pnpm --version` before creating.
-
-3. Create the project with the Core CLI. It resolves the official immutable
-   starter tag for its own version, so no starters checkout is involved:
-
-```bash
-npx -y @aotter/mantle@alpha create <type> <target-dir> \
-  --brand "<brand>" \
-  --description "<one sentence>" \
-  --locales <comma-separated-locales>
-```
-
-Pin an exact version (`@aotter/mantle@<version>`) when the user asked for one.
-`create` writes files and stops: it installs nothing, initializes no
-repository, configures no auth, and deploys nothing. It refuses to write into
-a path that already exists, and there is no force flag — choose a new
-directory instead.
-
-Do not clone the starters repository, copy `blank/`, merge overlays, or edit a
-provision bundle by hand. The CLI renders the same immutable bundle Mantle
-landing uses.
-
-4. For a typed launch, read `.mantle/handoff.md`, the selected overlay's
-   `layout.md`, `seed-prompt.md`, and `seed.json`. Shape the first local page by
-   editing that checked-in seed; generated content modules import it directly.
-   This is application source, not direct D1 authoring. Do not use Staff MCP
-   until an auth provider is configured.
-
-5. Initialize and verify the local project:
-
-```bash
-cd <target-dir>
-git init -b main
-pnpm install --frozen-lockfile
-pnpm exec mantle skills
-pnpm exec mantle skills --check
-pnpm validate
-pnpm typecheck
-pnpm dev
-```
-
-Open `http://localhost:8787`. Public preview works before auth is configured;
-auth-gated routes may return `503 setup_incomplete`. `blank` is intentionally
-empty; typed launches must show the selected seed. Do not infer SDK public
-render routes from the Core README—generated projects mount only the URL
-surface documented in their own README.
-
-## Continue an Existing Project
-
-Read these before editing:
-
-1. `.mantle/launch-state.json`, `.mantle/features.json`, and
-   `.mantle/handoff.md`.
-2. `package.json` for the installed `@aotter/mantle*` versions.
-
-Install the locked dependency graph and replace any stale projected Core
-skills before reading them:
-
-```bash
-pnpm install --frozen-lockfile
+```sh
+pnpm exec mantle generate
+pnpm exec mantle generate --check
+pnpm exec mantle validate
 pnpm exec mantle skills
 pnpm exec mantle skills --check
 ```
 
-Then read:
+Run the project's TypeScript check and start its actual local server. Probe a
+route the application declares; an API-only project may correctly return 404
+at `/`. Auth routes may return `503 setup_incomplete` until the selected auth
+provider is configured. Do not introduce an auth bypass to make smoke pass.
 
-3. Repo-local Mantle skills under `.agents/skills/` or `.claude/skills/`. A
-   project created before this layout may also carry `.agent/skills/`; read it
-   if present, but never write there and never delete it.
-4. Matching embedded docs under `node_modules/@aotter/mantle/docs/`.
+Commit the resolved lockfile in the application's normal workflow; subsequent
+installs use `pnpm install --frozen-lockfile`. Do not initialize/push a remote,
+provision resources, deploy or commit secrets as part of local verification.
 
-Use remote docs only when embedded docs are unavailable, and use a tag matching
-the installed version. Never use `develop` docs for a versioned project.
+## Existing application
 
-Do not branch on how the project was created. Verify the current git remote,
-live URL, and auth response, then skip work that is already complete.
+Read package.json, lockfile, actual entry, manifest files, provider config and
+project instructions. `.mantle/launch-state.json`, features or handoff files
+are optional legacy context, never prerequisites. Preserve them and user code.
+Install the frozen dependency graph, project installed Core skills, then read
+those skills and embedded docs. Never apply develop docs to an older package.
+Use the installed `mantle --help` and the project's scripts as authority.
 
-Then run:
+For legacy alpha.17 projects, retain their pinned behavior until an explicit
+upgrade is requested; read `docs/migration-0.1.2.md` before upgrading. Do not
+rewrite provider identities, delete metadata or fetch a nonexistent new Starter
+tag. SDK upgrades follow the update skill, not a bundle comparison command.
 
-```bash
-pnpm exec mantle skills --check
-pnpm validate
-pnpm typecheck
-```
+## Ship and report
 
-Inspect the already composed manifest, page, and seed files before changing
-them. Use the project's scripts first; ask the installed CLI for its command
-list rather than trusting one copied into prose:
+When deployment is requested, follow the installed provision skill and the
+observed host configuration. Legacy Landing remains an alpha.17 product; it
+is not a launch dependency for new Core projects.
 
-```bash
-pnpm exec mantle --help
-pnpm validate
-```
-
-## Production
-
-Local cold start intentionally stops before GitHub and Cloudflare operations.
-When the user asks to ship, use `mantle:provision` from the installed plugin or
-`node_modules/@aotter/mantle/skills/provision/SKILL.md`.
-
-Mantle landing is the first-run option when the user wants Mantle to create the
-private GitHub repo, connect Cloudflare, and offer paid hosted auth. Free
-self-hosted auth requires the owner to configure their GitHub OAuth App and
-provider secrets.
-
-## Report
-
-Return:
-
-- created or opened project path;
-- selected type and why;
-- local URL;
-- validation and typecheck results;
-- observed GitHub, deploy, and auth state;
-- three tailored next options: shape the visual experience, build the first
-  real business workflow, or finish deploy/auth if incomplete. Never leave
-  auth or seed data as the only next step.
-
-## Don't
-
-- Don't use the Mantle SDK checkout as the generated application.
-- Don't hand-compose starter layers; materialize the generated provision
-  bundle.
-- Don't push, deploy, or configure providers during local cold start.
-- Don't commit provider secrets.
-- Don't block the first useful page on optional media storage.
+Report the project path, exact SDK version, local URL/HTTP result and checks,
+plus any genuinely missing auth/provider setup. Do not claim a working homepage
+or authenticated MCP based only on successful generation.

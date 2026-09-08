@@ -4,7 +4,7 @@ This guide is the fresh-developer entry point for implementing a new mantle plat
 
 Read this with [ADR-0019](adr/0019-sealed-manifest-runtime-pipeline.md). The source of truth for TypeScript shapes is `packages/mantle-runtime/src/domain/port/`.
 
-Adapter packages live under `packages/adapters/<platform>/` using a plural `adapters` bucket. The npm package names stay unchanged, for example `@aotter/mantle-cloudflare`. Keep adapters in this monorepo until the runtime/spec API is stable enough that coordinated releases across separate repositories would not create version skew for starters.
+Adapter packages live under `packages/adapters/<platform>/` using a plural `adapters` bucket. The npm package names stay unchanged, for example `@aotter/mantle-cloudflare`. Keep adapters in this monorepo until the runtime/spec API is stable enough that coordinated releases across separate repositories would not create version skew for consumers.
 
 ## Required storage boundary
 
@@ -143,7 +143,7 @@ Minimum HTTP behavior for a full adapter:
 - Route `GET /api/views/<name>` to `runtime.executeView`.
 - Mount admin content APIs with session/role checks before calling runtime content use cases.
 - Serve selected Admin SPA assets through `AdminAssetServer`, with an SPA catchall for client-side routes.
-- Mount public render routes and markdown mirrors when the starter exposes public pages.
+- Mount public render routes and markdown mirrors when the application exposes public pages.
 - Translate runtime diagnostics and validation failures into stable HTTP JSON responses instead of throwing raw errors.
 - Evaluate target auth and dynamic guards through the runtime use cases; do
   not duplicate guard logic in HTTP handlers.
@@ -175,7 +175,7 @@ that opt-in only for anonymous `GET`/`HEAD` responses with status 200, explicit
 shared freshness, no request `Cookie` or `Authorization`, and no response
 `Set-Cookie`. It also varies public responses by `Cookie` and `Authorization`.
 
-A starter-level Workers Cache may therefore store only responses that still
+An application-level Workers Cache may therefore store only responses that still
 meet that exact public contract. It must bypass credentialed/cookie requests
 and must never infer cacheability from a URL prefix. Cache entries remain
 version-local; cross-version caching is outside this contract. Successful

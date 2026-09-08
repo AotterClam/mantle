@@ -107,7 +107,7 @@ Options:
   --no-source         Skip the handler-source grep entirely
   --phase <phase>     'preview' (default) or 'deploy'.
                         preview: grammar + cross-Schema checks only.
-                                 Suitable right after starter materialization
+                                 Suitable while authoring application manifests
                                  and during local \`pnpm dev\`.
                         deploy:  adds any pre-deploy-only checks.
                                  Run this before \`wrangler deploy\`.
