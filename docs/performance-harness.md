@@ -114,3 +114,14 @@ This is a new application state in the same workerd isolate, not a measurement
 of module startup CPU or an entrypoint cache HIT. Locale caching is enabled by
 a successful preparation fingerprint; editable settings and media policy still
 read the canonical database on every call.
+
+### HTTP Trigger routing
+
+The portable request handler indexes Trigger paths by method and segments once.
+Literal and wildcard branches retain sealed-plan order, including encoded literal
+collisions that an outer router may select differently. Each request decodes its
+segments once and invokes the original Trigger identity through the same runtime.
+The 1/10/100/1,000-route regression uses four segment lookups at every size;
+overlapping wildcard shapes can visit multiple branches, pruned by route rank.
+The HTTP microbench and workerd harness include the same route-count axis.
+Workerd wall times include I/O and are not CPU measurements or a fixed-ms CI gate.

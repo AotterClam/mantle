@@ -61,3 +61,62 @@ function safeDecode(segment: string): string | null {
 function stripTrailingSlash(p: string): string {
   return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
 }
+
+/** Index immutable routes; decode each request segment once, preserving input order. */
+export function compileRouteMatcher<Route extends { readonly path: string }>(
+  routes: readonly Route[],
+): (path: string) => { readonly route: Route; readonly params: Record<string, string> } | null {
+  interface Node {
+    readonly literals: Map<string, Node>;
+    parameter?: Node;
+    first: number;
+    leaf?: { route: Route; rank: number; params: readonly (readonly [string, number])[] };
+  }
+  const node = (): Node => ({ literals: new Map(), first: Infinity });
+  const root = node();
+  routes.forEach((route, rank) => {
+    let current = root;
+    const params: [string, number][] = [];
+    for (const [position, part] of stripTrailingSlash(route.path).split("/").entries()) {
+      current.first = Math.min(current.first, rank);
+      if (part.startsWith("{") && part.endsWith("}")) {
+        params.push([part.slice(1, -1), position]);
+        current = current.parameter ??= node();
+      } else {
+        let next = current.literals.get(part);
+        if (!next) current.literals.set(part, next = node());
+        current = next;
+      }
+    }
+    current.first = Math.min(current.first, rank);
+    current.leaf ??= { route, rank, params };
+  });
+  return (path) => {
+    const parts = stripTrailingSlash(path).split("/").map(safeDecode);
+    if (parts.includes(null)) return null;
+    let best: Node["leaf"];
+    // ponytail: overlapping wildcard shapes may visit multiple branches;
+    // subtree ranks prune losers. Use a DFA only if ambiguous-route profiles justify it.
+    const visit = (current: Node | undefined, depth: number): void => {
+      if (!current || current.first >= (best?.rank ?? Infinity)) return;
+      if (depth === parts.length) {
+        if (current.leaf && current.leaf.rank < (best?.rank ?? Infinity)) best = current.leaf;
+        return;
+      }
+      const literal = current.literals.get(parts[depth]!);
+      const parameter = current.parameter;
+      if ((literal?.first ?? Infinity) < (parameter?.first ?? Infinity)) {
+        visit(literal, depth + 1);
+        visit(parameter, depth + 1);
+      } else {
+        visit(parameter, depth + 1);
+        visit(literal, depth + 1);
+      }
+    };
+    visit(root, 0);
+    return best ? {
+      route: best.route,
+      params: Object.fromEntries(best.params.map(([name, position]) => [name, parts[position]!])),
+    } : null;
+  };
+}

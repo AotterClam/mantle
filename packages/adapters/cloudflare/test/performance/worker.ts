@@ -112,6 +112,7 @@ const manifests: Manifest[] = [
 ];
 
 let activeMetrics: D1QueryMetric[] | null = null;
+let routeCount = 0;
 let state: ReturnType<typeof createState> | null = null;
 
 function createState(env: Env) {
@@ -121,7 +122,16 @@ function createState(env: Env) {
   templates.registerListTemplate("posts", ({ entries }) =>
     `<main>${entries.map((entry) => `<h2>${entry.data["title"]}</h2>`).join("")}</main>`);
   const worker = createMantleWorker({
-    plan: compileTestPlan(manifests),
+    plan: compileTestPlan(routeCount ? [
+      ...manifests.filter((manifest) => manifest.kind !== "Trigger"),
+      ...Array.from({ length: routeCount }, (_, index): Manifest => ({
+        apiVersion: "cms.mantle.aotter.net/v1", kind: "Trigger", metadata: { name: `scaled-${index}` },
+        spec: {
+          source: { kind: "http", method: "POST", path: `/api/scaled-${String(index).padStart(4, "0")}` },
+          target: { procedure: "create-comment" },
+        },
+      })),
+    ] : manifests),
     templates,
     siteDefaults: {
       title: "Mantle performance fixture",
@@ -200,6 +210,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/__health") return new Response("ok");
     if (url.pathname === "/__reset") {
+      routeCount = Math.min(1000, Math.max(0, Number(url.searchParams.get("routes")) || 0));
       state = null;
       return new Response("reset");
     }

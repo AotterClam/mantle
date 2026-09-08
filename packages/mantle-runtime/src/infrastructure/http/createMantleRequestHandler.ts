@@ -10,7 +10,7 @@ import {
 import type { MantleRuntime } from "../../MantleRuntime.js";
 import type { HandlerContext } from "../../domain/model/HandlerContext.js";
 import { evaluateAuthAll } from "../../domain/service/AuthPredicateEvaluator.js";
-import { compilePathMatcher } from "../../domain/service/PathMatcher.js";
+import { compileRouteMatcher } from "../../domain/service/PathMatcher.js";
 import type { RuntimePlan } from "../../domain/service/RuntimePlanCompiler.js";
 import {
   ViewParamCoercionError,
@@ -34,10 +34,13 @@ export type MantleRequestHandler = (
 export function createMantleRequestHandler(
   options: MantleRequestHandlerOptions,
 ): MantleRequestHandler {
-  const triggers = options.plan.httpRoutes.map((route) => ({
-    ...route,
-    match: compilePathMatcher(route.path),
-  }));
+  const routesByMethod = new Map<string, RuntimePlan["httpRoutes"][number][]>();
+  for (const route of options.plan.httpRoutes) {
+    const routes = routesByMethod.get(route.method) ?? [];
+    routes.push(route);
+    routesByMethod.set(route.method, routes);
+  }
+  const triggers = new Map([...routesByMethod].map(([method, routes]) => [method, compileRouteMatcher(routes)]));
   const views = new Map(Object.values(options.plan.views)
     .filter(({ manifest }) => manifest.spec.surface === "public")
     .map((view) => [`${MANTLE_VIEW_ROUTE_PREFIX}/${view.name}`, view]));
@@ -45,21 +48,18 @@ export function createMantleRequestHandler(
   return async (request, context = { user: null, staff: null, env: {} }) => {
     const url = new URL(request.url);
     const view = request.method === "GET" ? views.get(url.pathname) : undefined;
-    const trigger = view ? undefined : triggers.find((route) =>
-      route.method === request.method && route.match(url.pathname) !== null,
-    );
+    const trigger = view ? null : triggers.get(request.method)?.(url.pathname);
     if (!view && !trigger) return null;
 
     try {
       const runtime = await options.getRuntime();
       if (view) return handleView(request, runtime, view.name, view.manifest, context);
-      const pathParams = trigger!.match(url.pathname)!;
       return handleTrigger(
         request,
         runtime,
-        trigger!.trigger,
-        trigger!.path,
-        pathParams,
+        trigger!.route.trigger,
+        trigger!.route.path,
+        trigger!.params,
         context,
       );
     } catch (error) {
