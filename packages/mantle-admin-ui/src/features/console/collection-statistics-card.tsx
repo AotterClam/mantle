@@ -8,6 +8,7 @@ import type { Collection } from "../../lib/types";
 import { usePreferences } from "../../app/preferences";
 import { t } from "../../app/i18n";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBox, SectionCard } from "../../ui/page";
 import { STATISTICS_RANGES, STATISTICS_PREFERENCE_KEY, parseStatisticsPreferences, statisticsCsv, statisticsSeries, stackedAreas, type CollectionStatistics, type StatisticsPreferences } from "./collection-statistics";
@@ -63,11 +64,14 @@ export function CollectionStatisticsCard({ collection, canonical }: {
       </div>
       {description && <p className="mt-1 truncate text-xs text-muted-foreground" title={description}>{description}</p>}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <label className="sr-only" htmlFor={`${chartId}-range`}>{title} · {t(language, "console.stats.range")}</label>
-        <select id={`${chartId}-range`} className="h-8 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={preferences.range}
-          onChange={(event) => updatePreferences({ ...preferences, range: event.target.value as StatisticsPreferences["range"] })}>
-          {STATISTICS_RANGES.map((range) => <option value={range} key={range}>{t(language, `console.stats.range.${range}`)}</option>)}
-        </select>
+        <Select value={preferences.range} onValueChange={(range) => updatePreferences({ ...preferences, range: range as StatisticsPreferences["range"] })}>
+          <SelectTrigger className="text-xs" aria-label={`${title} · ${t(language, "console.stats.range")}`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATISTICS_RANGES.map((range) => <SelectItem value={range} key={range}>{t(language, `console.stats.range.${range}`)}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label={`${title} · ${t(language, "console.stats.mode")}`}>
           {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode}
             onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.${mode}`)}</Button>)}
