@@ -178,8 +178,18 @@ const checks: readonly (readonly [string, (storage: PreparedMantleStorage) => Pr
     equal((await entries.readByDataField({ collection, field: "group", value: "g", status: "published", locale: "en" }))?.id, "en", "data-field read respects status/locale");
     equal(ids(await entries.readByDataFieldIn({ collection, field: "group", values: ["g", "g"], status: "published", locale: null })), ["null", "missing"], "IN read deduplicates values and filters locale");
     equal(await entries.readByDataFieldIn({ collection, field: "group", values: [] }), [], "empty IN read");
+    equal(ids(await entries.readByDataFieldIn({ collection, field: "group", values: ["g"], status: "published", latestPerValue: true })), ["null"], "latest parent per join value");
     equal(ids(await entries.readPublished({ collection, limit: 2 })), ["null", "missing"], "published limit/status/collection");
     equal(ids(await entries.readPublished({ collection, locale: "en" })), ["en"], "published exact locale");
+    const pageArgs = { collection, locale: "en", includeUnlocalized: true, limit: 2 } as const;
+    const page = await entries.readPublishedPage(pageArgs);
+    equal(ids(page.rows), ["null", "missing"], "published page merges shared locale and retains order");
+    assert(page.nextCursor !== undefined, "published page exposes continuation");
+    const next = await entries.readPublishedPage({ ...pageArgs, cursor: page.nextCursor, dataFields: ["slug", "absent"] });
+    equal(ids(next.rows), ["en"], "published continuation excludes other locales and drafts");
+    equal(next.rows[0]?.data, { slug: "shared", absent: null }, "published metadata projection");
+    equal(next.rows[0]?.locale, "en", "metadata projection retains envelope locale");
+    equal(next.nextCursor, undefined, "last published page terminates");
     equal(ids(await entries.findManyByDataField({ collection, field: "group", value: "g", limit: 2 })), ["draft", "null"], "findMany includes drafts and honors limit");
     equal((await entries.findByDataField({ collection, field: "slug", value: "shared", status: "published" }))?.id, "null", "repository data-field read");
     equal((await entries.findByDataFields({ collection, fields: { slug: "shared", locale: "en" }, excludeId: "draft" }))?.id, "en", "composite read and excludeId");
@@ -190,6 +200,7 @@ const checks: readonly (readonly [string, (storage: PreparedMantleStorage) => Pr
       await entries.readByDataField({ collection, field: "slug", value: "shared" }),
       ...await entries.readByDataFieldIn({ collection, field: "group", values: ["g"] }),
       ...await entries.readPublished({ collection }),
+      ...(await entries.readPublishedPage({ collection })).rows,
       ...await entries.findManyByDataField({ collection, field: "group", value: "g", limit: 10 }),
     ];
     const allowed = new Set(["id", "collection", "locale", "status", "version", "data", "createdAt", "updatedAt"]);

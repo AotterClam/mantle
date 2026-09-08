@@ -22,6 +22,8 @@ import type {
   ReadEntryByDataFieldArgs,
   ReadEntryBySlugArgs,
   ReadPublishedEntriesArgs,
+  ReadPublishedPageArgs,
+  PublishedEntryPage,
 } from "../../domain/port/EntryReader.js";
 import type { DatabaseDriver } from "../../domain/port/DatabaseDriver.js";
 import { clampLimit } from "../../domain/service/Pagination.js";
@@ -34,6 +36,10 @@ import {
   type EntryRow,
 } from "../../domain/model/EntryRow.js";
 import {
+  decodeEntryCursor,
+  encodeEntryCursor,
+  publishedPageLimit,
+  PUBLISHED_PAGE_DATA_BUDGET,
   decodeEntrySortCursor,
   encodeEntrySortCursor,
   escapeLikeTerm,
@@ -328,13 +334,16 @@ export class DatabaseEntryRepository implements EntryRepository, EntryReader {
         conditions.push("status = ?");
         binds.push(args.status);
       }
-      const rows = await this.db
-        .prepare(
-          `SELECT ${ENTRY_COLUMNS} FROM entries
-           WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC`,
-        )
-        .bind(...binds)
-        .all<EntryDbRow>();
+      const sql = args.latestPerValue
+        ? `SELECT ${ENTRY_COLUMNS} FROM entries WHERE id IN (
+            SELECT id FROM (
+              SELECT id, ROW_NUMBER() OVER (PARTITION BY json_extract(data, ?) ORDER BY updated_at DESC, id DESC) AS parent_rank
+              FROM entries WHERE ${conditions.join(" AND ")}
+            ) WHERE parent_rank = 1
+          ) ORDER BY updated_at DESC, id DESC`
+        : `SELECT ${ENTRY_COLUMNS} FROM entries WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC`;
+      if (args.latestPerValue) binds.unshift(jsonPathForTopLevelField(args.field));
+      const rows = await this.db.prepare(sql).bind(...binds).all<EntryDbRow>();
       entries.push(...rows.map(rowFromDb).map(projectPublicEntry));
     }
     entries.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -368,6 +377,51 @@ export class DatabaseEntryRepository implements EntryRepository, EntryReader {
     }
     const rows = await this.db.prepare(sql).bind(...binds).all<EntryDbRow>();
     return rows.map(rowFromDb).map(projectPublicEntry);
+  }
+
+  async readPublishedPage(args: ReadPublishedPageArgs = {}): Promise<PublishedEntryPage> {
+    const limit = publishedPageLimit(args.limit);
+    const cursor = decodeEntryCursor(args.cursor);
+    const binds: unknown[] = [];
+    const candidateQuery = (locale: string | null | undefined): string => {
+      const conditions = ["status = 'published'"];
+      // One bound JSON field list avoids D1's bind/function-argument ceilings.
+      // -> retains JSON types (json_extract would turn true/false into 1/0).
+      const data = args.dataFields
+        ? `(SELECT json_group_object(json_extract(field.value, '$[0]'),
+            json(entries.data -> json_extract(field.value, '$[1]')))
+            FROM json_each(?) AS field)` : "data";
+      if (args.dataFields) binds.push(JSON.stringify(args.dataFields.map((field) => [field, jsonPathForTopLevelField(field)])));
+      if (args.collection !== undefined) { conditions.push("collection = ?"); binds.push(args.collection); }
+      if (locale === null) conditions.push("entry_locale IS NULL");
+      else if (locale !== undefined) { conditions.push("entry_locale = ?"); binds.push(locale); }
+      if (cursor) { conditions.push("(updated_at, id) < (?, ?)"); binds.push(...cursor); }
+      return `SELECT id, collection, status, version, ${data} AS data, author_id,
+        created_at, updated_at, entry_locale FROM entries
+        WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC, id DESC LIMIT ${limit + 1}`;
+    };
+    const query = candidateQuery(args.locale);
+    const candidates = args.includeUnlocalized && typeof args.locale === "string"
+      ? `SELECT * FROM (${query}) UNION ALL SELECT * FROM (${candidateQuery(null)})`
+      : query;
+    // Window work is bounded to limit + 1 indexed candidates. Apply the byte
+    // budget inside SQLite, before transferring/parsing JSON in the Worker.
+    const rows = await this.db.prepare(`WITH candidates AS (
+      SELECT * FROM (${candidates}) ORDER BY updated_at DESC, id DESC LIMIT ${limit + 1}
+    ), budget AS (
+      SELECT *, LEAD(id) OVER (ORDER BY updated_at DESC, id DESC) AS next_id,
+        SUM(length(CAST(data AS BLOB))) OVER (ORDER BY updated_at DESC, id DESC) AS data_bytes
+        FROM candidates
+    ) SELECT * FROM budget WHERE data_bytes = length(CAST(data AS BLOB)) OR data_bytes <= ${PUBLISHED_PAGE_DATA_BUDGET}
+      ORDER BY updated_at DESC, id DESC`).bind(...binds)
+      .all<EntryDbRow & { next_id: string | null }>();
+    const page = rows.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      rows: page.map(rowFromDb).map(projectPublicEntry),
+      ...(last?.next_id != null
+        ? { nextCursor: encodeEntryCursor(last.updated_at, last.id) } : {}),
+    };
   }
 
   async findManyByDataField(
@@ -527,6 +581,7 @@ function usableIndexedFields(
 }
 
 interface EntryDbRow {
+  readonly entry_locale?: string | null;
   readonly id: string;
   readonly collection: string;
   readonly status: string;
@@ -561,7 +616,7 @@ function rowFromDb(row: EntryDbRow): EntryRow {
   return {
     id: row.id,
     collection: row.collection,
-    locale: liftLocale(data),
+    locale: row.entry_locale === undefined ? liftLocale(data) : row.entry_locale ?? undefined,
     status: row.status as ContentState,
     version: row.version,
     data,

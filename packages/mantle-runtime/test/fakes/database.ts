@@ -122,6 +122,45 @@ class InMemoryStatement implements PreparedStatement {
     const p = this.params;
     this.db.executions.push({ sql, params: p });
 
+    if (sql.includes("AS parent_rank")) {
+      const conditions = sql.match(/AS parent_rank FROM entries WHERE (.*?) \) WHERE parent_rank = 1/)![1];
+      const rows = runEntryReaderQuery(this.db, `SELECT * FROM entries WHERE ${conditions} ORDER BY updated_at DESC, id DESC`, p.slice(1));
+      const field = fieldFromJsonPath(String(p[0]));
+      const seen = new Set<unknown>();
+      return { rows: rows.filter((row) => {
+        const value = JSON.parse(String(row.data))[field];
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      }), changes: 0 };
+    }
+
+    if (sql.startsWith("WITH candidates AS (")) {
+      const queries = [...sql.matchAll(/SELECT id, collection, status, version, .*? FROM entries WHERE .*? LIMIT (\d+)/g)];
+      let bound = 0;
+      const all = queries.flatMap(([query]) => {
+        const projection = query.slice(0, query.indexOf(" FROM entries"));
+        const projectionBinds = (projection.match(/\?/g) ?? []).length;
+        const queryBinds = (query.match(/\?/g) ?? []).length;
+        const params = p.slice(bound, bound + queryBinds);
+        bound += queryBinds;
+        const fields = projectionBinds
+          ? (JSON.parse(String(params[0])) as string[][]).map((pair) => pair[0]!) : undefined;
+        return runEntryReaderQuery(this.db, query, params.slice(projectionBinds)).map((row) => {
+          const original = JSON.parse(String(row.data));
+          const data = fields ? JSON.stringify(Object.fromEntries(fields.map((field) => [field, original[field] ?? null]))) : String(row.data);
+          return { ...row, data, entry_locale: original.locale ?? null };
+        });
+      }).sort((a, b) => Number(b.updated_at) - Number(a.updated_at) || (String(a.id) < String(b.id) ? 1 : -1))
+        .slice(0, Number(queries[0]?.[1]));
+      let bytes = 0;
+      const rows = all.map((row, index) => {
+        bytes += new TextEncoder().encode(row.data).byteLength;
+        return { ...row, next_id: all[index + 1]?.id ?? null, data_bytes: bytes };
+      }).filter((row, index) => index === 0 || row.data_bytes <= 1_048_576);
+      return { rows, changes: 0 };
+    }
+
     if (sql === "SELECT fingerprint FROM _mantle_boot_state WHERE id = ? LIMIT 1") {
       const fingerprint = this.db.bootStates.get(p[0] as string);
       return { rows: fingerprint ? [{ fingerprint }] : [], changes: 0 };
@@ -583,6 +622,12 @@ function runEntryReaderQuery(
   let paramIndex = 0;
 
   for (const condition of conditions) {
+    if (condition === "(updated_at, id) < (?, ?)") {
+      const time = Number(params[paramIndex++]);
+      const id = String(params[paramIndex++]);
+      predicates.push((row) => row.updated_at < time || (row.updated_at === time && row.id < id));
+      continue;
+    }
     if (condition === "collection = ?") {
       const expected = params[paramIndex++];
       predicates.push((row) => row.collection === expected);

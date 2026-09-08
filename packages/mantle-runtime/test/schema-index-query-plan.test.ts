@@ -994,6 +994,44 @@ describe("EntryReader against crowded real SQLite", () => {
     }
   });
 
+  it("bounds published page bytes before transfer, preserves locale and resumes through ties", async () => {
+    const collection = "page-budget";
+    for (let index = 0; index < 8; index++) {
+      await reader.create({ id: `budget-${index}`, collection, status: index === 7 ? "draft" : "published",
+        data: { slug: `slug-${index}`, ...(index % 2 ? { locale: "en" } : {}), body: "x".repeat(600000) },
+        now: 100, authorId: "private-author" });
+    }
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await reader.readPublishedPage({ collection, locale: "en", includeUnlocalized: true, limit: 50, cursor });
+      expect(page.rows).toHaveLength(1);
+      expect(JSON.stringify(page.rows).length).toBeLessThan(601000);
+      expect(Object.hasOwn(page.rows[0]!, "authorId")).toBe(false);
+      seen.push(page.rows[0]!.id);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual([6, 5, 4, 3, 2, 1, 0].map((index) => `budget-${index}`));
+    const metadata = await reader.readPublishedPage({ collection, limit: 3, dataFields: ["slug", "missing"] });
+    expect(metadata.rows.map((entry) => entry.data)).toEqual([6, 5, 4].map((index) => ({ slug: `slug-${index}`, missing: null })));
+    expect(metadata.rows[1]!.locale).toBe("en");
+    expect(JSON.stringify(metadata).length).toBeLessThan(1000);
+    expect(metadata.nextCursor).toBeDefined();
+    executions.length = 0;
+    await reader.readPublishedPage({ collection, cursor: metadata.nextCursor, dataFields: [] });
+    const plan = executionPlanDetails(db, executions.at(-1)!).join("\n");
+    expect(plan).toMatch(/SEARCH entries USING INDEX/);
+    expect(plan).not.toContain("SCAN entries");
+
+    await reader.create({ id: "oversized", collection: "oversized", status: "published",
+      data: { body: "x".repeat(1100000), flag: true, no: false, nested: { items: [1, "two"] }, "punctuation.\"": "kept" }, now: 1, authorId: null });
+    const oversized = await reader.readPublishedPage({ collection: "oversized" });
+    expect(oversized.rows).toHaveLength(1);
+    expect(oversized.nextCursor).toBeUndefined();
+    const projected = await reader.readPublishedPage({ collection: "oversized", dataFields: ["flag", "no", "nested", "punctuation.\"", ...Array.from({ length: 100 }, (_, i) => `absent-${i}`)] });
+    expect(projected.rows[0]!.data).toMatchObject({ flag: true, no: false, nested: { items: [1, "two"] }, "punctuation.\"": "kept", "absent-99": null });
+  });
+
   it("chunks translation-parent reads below D1's 100-bind limit without N+1", async () => {
     const values = Array.from({ length: 191 }, (_, index) => `parent-${index}`);
     const translations = values.map((slug, index) => ({
@@ -1018,9 +1056,9 @@ describe("EntryReader against crowded real SQLite", () => {
     });
     const entryReads = executions.filter((execution) => execution.sql.includes("FROM entries"));
     expect(entryReads).toHaveLength(3);
-    expect(entryReads.map((execution) => execution.params.length)).toEqual([99, 99, 5]);
+    expect(entryReads.map((execution) => execution.params.length)).toEqual([100, 100, 6]);
     expect(Math.max(...entryReads.map((execution) => execution.params.length))).toBeLessThanOrEqual(100);
-    expect(entryReads[0]?.params.slice(2, 97)).toEqual(values.slice(0, 95));
-    expect(entryReads[1]?.params.slice(2, 97)).toEqual(values.slice(95, 190));
+    expect(entryReads[0]?.params.slice(3, 98)).toEqual(values.slice(0, 95));
+    expect(entryReads[1]?.params.slice(3, 98)).toEqual(values.slice(95, 190));
   });
 });

@@ -47,6 +47,8 @@ export interface PublicPathResolverConfig {
 }
 
 export interface PublicPathResolver {
+  /** Entry data needed for path resolution; omitted custom resolvers receive full data. */
+  readonly dataFields?: readonly string[];
   /** Returns `/{locale}/{segment}/{slug}` style path, or `null` if the
    *  entry has no public URL under this configuration. */
   forEntry(entry: Entry): string | null;
@@ -60,6 +62,7 @@ export function createPublicPathResolver(
 ): PublicPathResolver {
   const routes = config.collectionRoutes;
   return {
+    dataFields: ["slug"],
     forEntry(entry: Entry): string | null {
       const route = routes[entry.collection];
       if (!route || route.segment === null) return null;

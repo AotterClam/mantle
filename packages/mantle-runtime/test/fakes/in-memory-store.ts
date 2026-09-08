@@ -1,3 +1,4 @@
+import { paginatePublishedEntries } from "../../src/infrastructure/persistence/Pagination.js";
 import type { ContentState, Entry, SchemaManifest } from "@aotter/mantle-spec";
 import {
   EntryStatusConflict,
@@ -14,6 +15,8 @@ import type {
   ReadEntryByDataFieldArgs,
   ReadEntryBySlugArgs,
   ReadPublishedEntriesArgs,
+  ReadPublishedPageArgs,
+  PublishedEntryPage,
 } from "../../src/domain/port/EntryReader.js";
 import type {
   CreateEntryArgs,
@@ -222,7 +225,7 @@ export class InMemoryEntryRepository implements EntryRepository, EntryReader {
     const row = [...this.rows.values()]
       .filter((item) => item.collection === args.collection)
       .filter((item) => args.status === undefined || item.status === args.status)
-      .filter((item) => args.locale === undefined || item.locale === args.locale)
+      .filter((item) => args.locale === undefined || (args.locale === null ? item.locale == null : item.locale === args.locale))
       .filter((item) => item.data[args.field] === args.value)
       .sort((a, b) => b.updatedAt - a.updatedAt)[0];
     return row ? projectPublicEntry(row) : null;
@@ -230,16 +233,24 @@ export class InMemoryEntryRepository implements EntryRepository, EntryReader {
 
   async readByDataFieldIn(args: ReadEntriesByDataFieldInArgs): Promise<readonly Entry[]> {
     const values = new Set(args.values);
+    const seen = new Set<unknown>();
     return [...this.rows.values()]
       .filter((item) => item.collection === args.collection)
       .filter((item) => args.status === undefined || item.status === args.status)
-      .filter((item) => args.locale === undefined || item.locale === args.locale)
+      .filter((item) => args.locale === undefined || (args.locale === null ? item.locale == null : item.locale === args.locale))
       .filter((item) => {
         const value = item.data[args.field];
         return (typeof value === "string" || typeof value === "number" || typeof value === "boolean") &&
           values.has(value);
       })
       .sort((a, b) => b.updatedAt - a.updatedAt)
+      .filter((entry) => {
+        if (!args.latestPerValue) return true;
+        const value = entry.data[args.field];
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      })
       .map(projectPublicEntry);
   }
 
@@ -247,10 +258,17 @@ export class InMemoryEntryRepository implements EntryRepository, EntryReader {
     return [...this.rows.values()]
       .filter((item) => item.status === "published")
       .filter((item) => args.collection === undefined || item.collection === args.collection)
-      .filter((item) => args.locale === undefined || item.locale === args.locale)
+      .filter((item) => args.locale === undefined || (args.locale === null ? item.locale == null : item.locale === args.locale))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, args.limit ?? this.rows.size)
       .map(projectPublicEntry);
+  }
+
+  async readPublishedPage(args: ReadPublishedPageArgs = {}): Promise<PublishedEntryPage> {
+    const rows = await this.readPublished({ collection: args.collection,
+      locale: args.includeUnlocalized && typeof args.locale === "string" ? undefined : args.locale });
+    return paginatePublishedEntries(args.includeUnlocalized && typeof args.locale === "string"
+      ? rows.filter((entry) => entry.locale === args.locale || entry.locale == null) : rows, args);
   }
 
   async findManyByDataField(

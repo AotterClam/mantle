@@ -24,6 +24,40 @@ const html = await web.renderEntryLive.execute({
 Omit this package when an application only needs Mantle parsing, planning, or
 headless runtime operations.
 
+## Public content pages
+
+`renderListLive.execute` returns `{ html, nextCursor? } | null`.
+`composeLlmsTxt.execute` returns `{ body, nextCursor? } | null`, where `body`
+can be null for a page without serializable public documents.
+`composeSitemap.execute` returns `{ body, nextCursor? }` for one sitemap part.
+These alpha APIs now return explicit pages: a custom adapter must expose or
+follow `nextCursor`, including when the current llms page has no body.
+
+Lists and llms default to 50 entries. Pass `cursor` from the previous result and
+optionally `limit` to change page size. Ordering is `updatedAt DESC, id DESC`;
+these are live forward pages, not a snapshot during concurrent publication.
+The reader limits each page to 2,000 rows and 1 MiB of data JSON, except a single
+oversized entry is returned alone so iteration can advance.
+
+For root llms, omit `locale`, pass `locales: site.locales`, and provide
+`pathFor(entry, locale)` to expand shared entries without repeated database reads.
+For a sitemap, `maxUrls` is entries per part (default 2,000). Serve an index with
+`composeSitemap.index(request, cursor => partUrl(cursor))`; every part must use
+the same request projection and limit. Parts have the standard 50,000-URL /
+50-MiB protocol ceilings and fail explicitly if custom expansion exceeds them.
+The index walks bounded metadata pages, so its database work is proportional
+to site size. `additionalPaths` appears only in the first part.
+
+A custom sitemap `pathFor` receives full bounded data unless `dataFields` names
+its required top-level fields. Built-in path resolution projects only `slug`.
+Custom `PublicPathResolver` implementations can declare `dataFields` for the
+Cloudflare mount to use; omission retains full data. Missing projected keys
+are null and envelope fields, including locale, remain available.
+
+Cloudflare's public mount supplies visible Next navigation and HTTP continuation
+links, and serves `/sitemap.xml?part=1&cursor=...` parts automatically. The
+existing preview authorization and public-response cache policy still apply.
+
 ## WebMCP (opt in)
 
 Browsers implementing the draft imperative WebMCP API can expose public Mantle

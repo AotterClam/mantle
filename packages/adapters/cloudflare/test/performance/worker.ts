@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { Manifest } from "@aotter/mantle-spec";
-import { TemplateRegistry } from "@aotter/mantle-web";
+import { TemplateRegistry, createPublicPathResolver } from "@aotter/mantle-web";
 import {
   D1DatabaseDriver,
   createMantleWorker,
@@ -133,6 +133,7 @@ function createState(env: Env) {
       })),
     ] : manifests),
     templates,
+    publicPathResolver: createPublicPathResolver({ collectionRoutes: { posts: { segment: "posts" } } }),
     siteDefaults: {
       title: "Mantle performance fixture",
       brand: "Mantle",

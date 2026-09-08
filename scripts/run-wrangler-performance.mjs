@@ -152,6 +152,14 @@ try {
       }], rounds: 20, warmup: 2,
     }));
   }
+  await checkedFetch(`${baseUrl}/__reset`);
+  const publicDiscovery = await benchmarkHttpRoutes({
+    targets: [
+      { name: "list-10000", url: `${baseUrl}/en/posts` },
+      { name: "root-llms-10000", url: `${baseUrl}/llms.txt` },
+      { name: "sitemap-10000", url: `${baseUrl}/sitemap.xml` },
+    ], rounds: 5, warmup: 2,
+  });
   const smallRows = metric(small, "rowsRead");
   const crowdedRows = metric(crowded, "rowsRead");
   const crowdedQueries = metric(crowded, "queryCount");
@@ -166,6 +174,10 @@ try {
   const publicCreateRows = metric(publicCreate, "rowsRead");
   const publicCreateQueries = metric(publicCreate, "queryCount");
   const gates = {
+    publicListAndLlmsUseTwoStatements: publicDiscovery.results.slice(0, 2).every((sample) => sample.queryCount?.max === 2),
+    sitemapIndexUsesBoundedMetadataPages: (publicDiscovery.results[2].queryCount?.max ?? Infinity) <= 20,
+    publicListAndLlmsRowsBounded: publicDiscovery.results.slice(0, 2).every((sample) => (sample.rowsRead?.max ?? Infinity) <= 1000),
+    sitemapMetadataIndexReadsLinearWork: (publicDiscovery.results[2].rowsRead?.max ?? Infinity) <= 12 * 34_000,
     scaledTriggersKeepOneStatement: routeScaling.every((sample) => metric(sample, "queryCount").max === 1),
     emptyHealthDoesNotPrepare: metric(emptyHealth, "queryCount").max === 0,
     staticRoutesDoNotPrepare: readiness.slice(0, 3).every((sample) => metric(sample, "queryCount").max === 0),
@@ -201,6 +213,7 @@ try {
       ...adminDetailDense.results,
       ...publicCreate.results,
       ...routeScaling.flatMap((sample) => sample.results),
+      ...publicDiscovery.results,
     ],
     gates,
   };

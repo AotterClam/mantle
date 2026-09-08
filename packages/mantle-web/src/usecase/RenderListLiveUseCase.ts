@@ -27,16 +27,18 @@ export class RenderListLiveUseCase {
     private readonly mediaAssets: MediaAssetResolver | null = null,
   ) {}
 
-  async execute(request: RenderListLiveRequest): Promise<string | null> {
-    const raw = await this.reader.readPublished({
+  async execute(request: RenderListLiveRequest): Promise<{ html: string; nextCursor?: string } | null> {
+    const page = await this.reader.readPublishedPage({
+      cursor: request.cursor,
+      limit: request.limit,
       collection: request.collection,
       locale: request.contentLocale === undefined ? request.locale : request.contentLocale,
     });
-    const entries = await joinParentForList(this.reader, this.schemas, raw, {
+    const entries = await joinParentForList(this.reader, this.schemas, page.rows, {
       parentStatus: "published",
     });
     const mediaAssets = await resolveMediaAssetsForEntries(this.mediaAssets, entries);
-    return renderListHtml({
+    const html = renderListHtml({
       collection: request.collection,
       locale: request.locale,
       entries,
@@ -45,5 +47,6 @@ export class RenderListLiveUseCase {
       mediaAssets,
       seo: request.seo,
     });
+    return html === null ? null : { html, nextCursor: page.nextCursor };
   }
 }

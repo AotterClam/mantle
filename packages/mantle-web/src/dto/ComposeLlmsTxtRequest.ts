@@ -4,11 +4,15 @@ import type { WebSiteConfig } from "../model/WebSiteConfig.js";
 export interface ComposeLlmsTxtRequest {
   readonly site: WebSiteConfig;
   /** locale: string → entries with that locale; locale: null →
-   *  non-localized only (matches publish-pipeline semantic). */
-  readonly locale: string | null;
+   *  non-localized only; omitted reads all locales for a root page. */
+  readonly locale?: string | null;
+  /** Root aggregate: read one canonical page, then expand shared entries per locale. */
+  readonly locales?: readonly string[];
+  readonly cursor?: string;
+  readonly limit?: number;
   /** Include public non-localized entries alongside the requested locale. */
   readonly includeUnlocalized?: boolean;
   /** Optional collection limit used by collection-list markdown mirrors. */
   readonly collection?: string;
-  readonly pathFor?: (entry: Entry) => string | null;
+  readonly pathFor?: (entry: Entry, locale: string) => string | null;
 }

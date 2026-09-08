@@ -77,12 +77,11 @@ export async function joinParentForList(
     collection: translates.parent,
     field: translates.on,
     values: [...joinValues],
+    latestPerValue: true,
     locale: null,
     status: options.parentStatus,
   });
-  // Multiple rows per joinValue are sorted updated_at DESC by the
-  // query; first occurrence wins (matches single-entry path which
-  // does LIMIT 1).
+  // Storage returns only the newest published parent per join value.
   const parentByValue = new Map<string, Entry>();
   for (const parent of parents) {
     const key = parent.data[translates.on];

@@ -4,36 +4,31 @@ import type { PublicPathResolver } from "../service/PublicPathResolver.js";
 import { serializeLlmsTxt } from "../service/MarkdownSerializer.js";
 import type { ComposeLlmsTxtRequest } from "../dto/ComposeLlmsTxtRequest.js";
 
-/**
- * Compose a `/llms.txt` body from currently-published entries.
- *
- *   - locale: string  → entries with `data.locale === locale`
- *   - locale: null    → non-localized entries only. Consumers that want
- *                       a cross-locale aggregate at the root URL should
- *                       iterate site.locales themselves and concat.
- */
+/** Compose one bounded discovery page; callers must expose nextCursor. */
 export class ComposeLlmsTxtUseCase {
   constructor(
     private readonly reader: EntryReader,
     private readonly paths: PublicPathResolver | null,
   ) {}
 
-  async execute(request: ComposeLlmsTxtRequest): Promise<string | null> {
+  async execute(request: ComposeLlmsTxtRequest): Promise<{ body: string | null; nextCursor?: string } | null> {
     if (!this.paths) return null;
-    const query = (locale: string | null) => this.reader.readPublished({
-      locale,
+    const page = await this.reader.readPublishedPage({
+      locale: request.locale,
       collection: request.collection,
+      includeUnlocalized: request.includeUnlocalized,
+      cursor: request.cursor,
+      limit: request.limit,
     });
-    const entries = request.locale !== null && request.includeUnlocalized
-      ? (await Promise.all([query(request.locale), query(null)])).flat()
-      : await query(request.locale);
-    const grouped = groupByCollection(entries);
-    return serializeLlmsTxt({
+    const bodies = (request.locales ?? [request.locale ?? ""]).map((locale) => serializeLlmsTxt({
       site: request.site,
-      locale: request.locale ?? "",
-      entriesByCollection: grouped,
-      pathFor: request.pathFor ?? ((entry) => this.paths!.forEntry(entry)),
-    });
+      locale,
+      entriesByCollection: groupByCollection(request.locales
+        ? page.rows.filter((entry) => !entry.locale || entry.locale === locale)
+        : page.rows),
+      pathFor: (entry) => request.pathFor ? request.pathFor(entry, locale) : this.paths!.forEntry(entry),
+    })).filter((body): body is string => body !== null);
+    return { body: bodies.length ? bodies.join("\n---\n\n") : null, nextCursor: page.nextCursor };
   }
 }
 
