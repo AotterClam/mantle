@@ -1,6 +1,7 @@
 # ADR-lite: native and full-facade performance evidence (#812)
 
-Status: implemented; local gates passed, deployed acceptance recorded separately.
+Status: implemented; local gates passed. The deployment report and per-block
+budget verdicts are maintained in [PR #821](https://github.com/aotter/mantle/pull/821).
 
 The existing HTTP harness now records TTFB and full-body timing separately,
 response bytes, and bounded concurrent arrivals. `pnpm bench:wrangler` keeps the
