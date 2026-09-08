@@ -7,7 +7,7 @@ let seed = 812;
 const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
 const percentile = (values, quantile) => [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * quantile) - 1)];
 const median = (values) => percentile(values, 0.5);
-const finiteValues = (result, field) => (result.platform ?? []).flatMap((sample) => Number.isFinite(sample[field]) ? [sample[field]] : []);
+const finiteValues = (result, field) => (result.platform ?? []).filter((sample) => sample.cohort !== "first-in-isolate").flatMap((sample) => Number.isFinite(sample[field]) ? [sample[field]] : []);
 function platformComparison(a, b, field) {
   const av = finiteValues(a, field), bv = finiteValues(b, field);
   return { samples: [av.length, bv.length], F2: av.length ? median(av) : null, M: bv.length ? median(bv) : null,
@@ -24,13 +24,15 @@ const summary = reports.map(({ path, report }) => {
   for (const baseline of report.results.filter((result) => result.name.endsWith("-F2"))) {
     const name = baseline.name.slice(0, -3), mantle = report.results.find((result) => result.name === `${name}-M`);
     if (!mantle) continue;
-    const baselineMs = baseline.samples.map((sample) => sample.elapsedMs), mantleMs = mantle.samples.map((sample) => sample.elapsedMs);
+    const repeatSamples = (result) => result.samples.filter((_, index) => (result.platform?.[index]?.cohort ?? result.records[index]?.cohort) !== "first-in-isolate");
+    const baselineMs = repeatSamples(baseline).map((sample) => sample.elapsedMs), mantleMs = repeatSamples(mantle).map((sample) => sample.elapsedMs);
+    if (!baselineMs.length || !mantleMs.length) continue;
     const observedD1 = (result, field) => result.records.length && result.records.some(({ record }) => record.d1?.[field] != null) ? Math.max(...result.records.flatMap(({ record }) => record.d1?.[field] == null ? [] : [record.d1[field]])) : null;
-    comparisons.push({ name, samples: [baselineMs.length, mantleMs.length],
+    comparisons.push({ name, firstInIsolateSamples: { F2: baseline.samples.length - baselineMs.length, M: mantle.samples.length - mantleMs.length }, samples: [baselineMs.length, mantleMs.length],
       fullBodyP50Ms: { F2: median(baselineMs), M: median(mantleMs), delta: median(mantleMs) - median(baselineMs), delta95CI: interval(baselineMs, mantleMs) },
       platformCpuP50Ms: platformComparison(baseline, mantle, "cpuTimeMs"),
       platformWallP50Ms: platformComparison(baseline, mantle, "wallTimeMs"),
-      ttfbP50Ms: { F2: baseline.ttfbMs.p50, M: mantle.ttfbMs.p50 },
+      ttfbP50Ms: { F2: median(repeatSamples(baseline).map((sample) => sample.ttfbMs)), M: median(repeatSamples(mantle).map((sample) => sample.ttfbMs)) },
       sampledActiveMsPerRequest: { F2: baseline.cpuProfile?.activeMsPerRequest ?? null, M: mantle.cpuProfile?.activeMsPerRequest ?? null },
       maxD1Statements: { F2: observedD1(baseline, "statements"), M: observedD1(mantle, "statements") },
       minD1MetadataStatements: { F2: baseline.records.length ? Math.min(...baseline.records.map(({ record }) => record.d1.metadataStatements)) : null, M: mantle.records.length ? Math.min(...mantle.records.map(({ record }) => record.d1.metadataStatements)) : null },
@@ -47,4 +49,4 @@ const summary = reports.map(({ path, report }) => {
     comparisons,
   };
 });
-process.stdout.write(JSON.stringify({ version: 1, note: "95% bootstrap intervals resample requests within each run; shared-host drift and cross-request correlation are not removed. Compare alternating repeated deployment blocks for placement conclusions. CDP sampled active time is a local profiling signal, not billing CPU or per-request CPU observations.", summary }, null, 2) + "\n");
+process.stdout.write(JSON.stringify({ version: 1, note: "Comparisons use repeat-in-isolate workload samples; first-for-workload samples remain in raw reports. 95% bootstrap intervals resample requests within each run; shared-host drift and cross-request correlation are not removed. Compare alternating repeated deployment blocks for placement conclusions. CDP sampled active time is a local profiling signal, not billing CPU or per-request CPU observations.", summary }, null, 2) + "\n");

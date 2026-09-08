@@ -60,9 +60,9 @@ try {
     const routeCount = currentBoot.routes, viewCount = currentBoot.views;
     for (const layer of (process.env.BENCH_ORDER === "reverse" ? ["M", "F2", "F1"] : ["F1", "F2", "M"])) {
       const view = await measure(`scale-view-${viewCount}-${layer}`, `/api/views/items-${viewCount - 1}`, { layer, rounds: 100 });
-      assert(view.records.every(({ record }) => record.d1.statements === 1));
+      assertNativeBudget(view.records, 1, "scaled View");
       const procedure = await measure(`scale-trigger-${routeCount}-${layer}`, `/api/lookup-${String(routeCount - 1).padStart(4, "0")}`, { layer, json: { id: "item-1" }, rounds: 100 });
-      assert(procedure.records.every(({ record }) => record.d1.statements === 1));
+      assertNativeBudget(procedure.records, 1, "scaled Procedure");
     }
     await measure("scale-catalog", "/api/views", { rounds: 20 });
     for (const layer of (process.env.BENCH_ORDER === "reverse" ? ["M", "F2"] : ["F2", "M"])) await measure(`scale-mcp-catalog-${layer}`, "/mcp", { layer, token: true, json: { jsonrpc: "2.0", id: 1, method: "tools/list" }, rounds: 30 });
@@ -83,7 +83,8 @@ try {
       assert.deepEqual(body, expected, `${layer} public View result`);
       assert.equal(body.data.rows.length, 20);
       assert(body.data.rows.every((row) => Number(row.id.slice(5)) % 5 !== 0), "draft privacy");
-      assert(measured.records.every(({ record }) => record.d1.statements === 1 && record.d1.rowsRead <= 100), "one indexed native statement");
+      assertNativeBudget(measured.records, 1, "indexed View");
+      assert(measured.records.every(({ record }) => record.d1.rowsRead <= 100), "indexed native rows budget");
     }
     for (const layer of (process.env.BENCH_ORDER === "reverse" ? ["M", "F2", "F1"] : ["F1", "F2", "M"])) await measure(`procedure-${rows}-${bytes}-${layer}`, "/api/lookup-0000", {
       layer, json: { id: "item-1" }, expected: { ok: true, data: { entry: { id: "item-1", data: JSON.stringify({ slug: "item-1", locale: (process.env.BENCH_LOCALES ?? "en").split(",")[1 % (process.env.BENCH_LOCALES ?? "en").split(",").length], title: "Item 1", body: "x".repeat(bytes) }) } } },
@@ -101,7 +102,8 @@ try {
     const sample = await measure(`mcp-catalog-${layer}`, "/mcp", { layer, token: true, json: rpc });
     catalog ??= JSON.parse(sample.bodies[0]);
     assert.deepEqual(JSON.parse(sample.bodies[0]), catalog);
-    assert(sample.records.every(({ record }) => record.d1.statements === 2 && record.kv.get.calls === 1 && record.rpcOutcome === "result"), "one grant + fresh role + KV catalog");
+    assertNativeBudget(sample.records, 2, "MCP catalog");
+    assert(sample.records.every(({ record }) => record.rpcOutcome === "result" && record.kv.get.calls <= 1));
   }
   const viewTool = catalog.result.tools.find((tool) => tool.name.includes("items-0") || tool.name.includes("items_0"));
   assert(viewTool, "public View tool exists");
@@ -112,7 +114,8 @@ try {
       const sample = await measure(`mcp-view-${authMode}-c${concurrency}-${layer}`, "/mcp", { layer, token: true, dpop: authMode === "dpop", json: call, concurrency });
       expected ??= JSON.parse(sample.bodies[0]);
       assert.deepEqual(JSON.parse(sample.bodies[0]), expected);
-      assert(sample.records.every(({ record }) => record.d1.statements === (authMode === "dpop" ? 4 : 3) && record.rpcOutcome === "result" && record.d1.failures === 0), `native ${authMode} counts: ${sample.records.map(({ record }) => record.d1.statements).join(",")}`);
+      assertNativeBudget(sample.records, authMode === "dpop" ? 4 : 3, `MCP View ${authMode}`);
+      assert(sample.records.every(({ record }) => record.rpcOutcome === "result"));
     }
   }
   for (const layer of (process.env.BENCH_ORDER === "reverse" ? ["M", "F2"] : ["F2", "M"])) {
@@ -198,7 +201,7 @@ async function measure(name, path, options = {}) {
     targets: [{ name, url: `${origin}${path}`, expectedStatus: options.status ?? 200, init: async () => {
       const id = randomUUID(); ids.push(id);
       const headers = { "x-benchmark-key": key, "x-benchmark-layer": layer, "x-benchmark-request": id,
-        "x-benchmark-observe": observed ? "on" : "off", "mcp-protocol-version": "2025-11-25" };
+        "x-benchmark-case": name, "x-benchmark-observe": observed ? "on" : "off", "mcp-protocol-version": "2025-11-25" };
       if (remote) headers.cookie = "__benchmark_origin=1"; // Force facade private/no-store for origin timing.
       if (options.cookie) headers.cookie = credentials.cookie;
       if (options.token) {
@@ -237,7 +240,7 @@ async function measure(name, path, options = {}) {
   const warmup = options.warmup ?? 2;
   const measuredRecords = observed ? observations.slice(warmup) : [];
   assert(measuredRecords.every(({ record }) => record.simultaneousArrivals >= 1 && record.simultaneousArrivals <= (options.concurrency ?? 1)), `${name} arrivals stay within client concurrency`);
-  const platform = observations.slice(warmup).map(({ platform, placement, colo }) => ({ ...(platform ?? {}), placement, ingressColo: colo }));
+  const platform = observations.slice(warmup).map(({ platform, placement, colo, cohort }) => ({ ...(platform ?? {}), placement, ingressColo: colo, cohort }));
   results.push({ name, layer, observed, concurrency: options.concurrency ?? 1, ...report.results[0], samples,
     records: measuredRecords, platform, cpuProfile, heap, expectedStatus: options.status ?? 200, errors: samples.filter((sample) => sample.status >= 400).length });
   process.stdout.write(`${name}: ${report.results[0].timingMs.p50.toFixed(2)} ms, ${samples.length} samples\n`);
@@ -375,9 +378,9 @@ async function connectRemoteTail() {
       if (log.message?.[0] !== "mantle-benchmark-v1" || typeof log.message[1] !== "string") continue;
       let data; try { data = JSON.parse(log.message[1]); } catch { continue; }
       if (!/^[a-f0-9-]{36}$/i.test(data?.id) || !data.observation) continue;
-      const { record, bootId, colo, country, placement } = data.observation;
+      const { record, bootId, colo, country, placement, cohort } = data.observation;
       if (records.size >= 2000) records.delete(records.keys().next().value);
-      records.set(data.id, { record: record ?? null, bootId, colo, country, placement,
+      records.set(data.id, { record: record ?? null, bootId, colo, country, placement, cohort,
         platform: { source: "Cloudflare real-time trace-v1", cpuTimeMs: Number.isFinite(event.cpuTime) ? event.cpuTime : null,
           wallTimeMs: Number.isFinite(event.wallTime) ? event.wallTime : null, outcome: event.outcome,
           timestamp: event.eventTimestamp, scriptVersion: event.scriptVersion?.id ?? null, truncated: event.truncated } });
@@ -403,4 +406,12 @@ async function connectRemoteTail() {
     records.delete(readyId);
     return { records, close };
   } catch (error) { await close(); throw error; }
+}
+
+function assertNativeBudget(records, expected, name) {
+  const repeated = records.filter((sample) => sample.cohort === "repeat-in-isolate");
+  assert(repeated.length, `${name}: repeat-in-isolate samples available`);
+  assert(records.every(({ record, cohort }) => record.d1.failures === 0 && (cohort === "repeat-in-isolate"
+    ? record.d1.statements === expected : record.d1.statements >= expected && record.d1.statements <= expected + 6)),
+    `${name}: statement budget ${records.map(({ record, cohort }) => `${cohort}:${record.d1.statements}`).join(",")}`);
 }

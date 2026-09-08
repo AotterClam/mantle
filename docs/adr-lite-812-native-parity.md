@@ -33,7 +33,14 @@ extra Schemas are unindexed to keep the index-count axis fixed. D1 has a 100-col
 limit, including generated index columns, so this is not a claim that 1,000 indexed
 Schemas fit one entries table. Body/row axes use 64 B/4 KiB and 100/10,000/50,000;
 locales use 1/3/10, MCP client concurrency uses 1/4/8, R2 uses 1/3/12 variants at
-1/64/256 KiB. Actual simultaneous arrivals can be below client concurrency.
+1/64/256 KiB. Actual simultaneous arrivals can be below client concurrency. The remote fleet
+can add isolates during a batch. A request is repeat-in-isolate only after that
+exact workload previously completed there; overlapping first arrivals stay in
+the first-for-workload cohort. Two global warmups alone cannot prove a warm fleet.
+First requests retain their raw records and a bounded extra-six-statement setup
+allowance; repeat MCP requests must meet the exact two/three/four-statement gate.
+Parity summaries use repeat cohorts; first-for-workload does not necessarily mean
+cold module startup (another workload may already have used that isolate).
 
 ## Stable gates and measured signals
 
