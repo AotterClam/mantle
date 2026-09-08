@@ -22,7 +22,8 @@ interface Env { DB: D1Database; MANTLE_KV: KVNamespace; MEDIA?: R2Bucket; BENCHM
 type Layer = "F0" | "F1" | "F2" | "M";
 const plan = sealRuntimePlan(planData as RuntimePlanData);
 let bootId: string;
-const records = new Map<string, { record: RequestDiagnosticRecord; bootId: string; colo: unknown; country: unknown; placement: string | null }>();
+const completedCases = new Set<string>();
+const records = new Map<string, { record: RequestDiagnosticRecord; bootId: string; colo: unknown; country: unknown; placement: string | null; cohort: string | null }>();
 const states = new Map<boolean, ReturnType<typeof createState>>();
 
 function createState(raw: Env, origin: string, observed: boolean) {
@@ -221,10 +222,20 @@ export default {
     const path = url.pathname;
     const surface: RequestDiagnosticRecord["surface"] = path.startsWith("/mcp") ? "mcp" : path === "/r2" ? "r2" : path.startsWith("/admin") ? "admin"
       : path === "/api/views" ? "catalog" : path.startsWith("/api/views/") ? "view" : path.startsWith("/api/lookup") ? "procedure" : path === "/health" ? "health" : "web";
-    const run = () => layer === "F0" && path !== "/r2" ? Promise.resolve(applyCachePolicy(request, new Response("ok"))) : currentState().fetch(layer, request, ctx);
+    const caseName = request.headers.get("x-benchmark-case");
+    if (caseName && caseName.length > 200) return new Response("invalid case", { status: 400 });
+    const cohort = caseName ? (completedCases.has(caseName) ? "repeat-in-isolate" : "first-in-isolate") : null;
+    const run = async () => {
+      const response = await (layer === "F0" && path !== "/r2" ? Promise.resolve(applyCachePolicy(request, new Response("ok"))) : currentState().fetch(layer, request, ctx));
+      if (caseName) {
+        if (completedCases.size >= 1000) completedCases.delete(completedCases.values().next().value!);
+        completedCases.add(caseName);
+      }
+      return response;
+    };
     const id = request.headers.get("x-benchmark-request");
     const observation = (record: RequestDiagnosticRecord | null) => ({ record, bootId, colo: request.cf?.colo ?? null, country: request.cf?.country ?? null,
-      placement: request.headers.get("cf-placement") });
+      placement: request.headers.get("cf-placement"), cohort });
     if (!observed) {
       const response = await run();
       if (id && raw.BENCH_REMOTE_RECORDS === "1") console.log("mantle-benchmark-v1", JSON.stringify({ id, observation: observation(null) }));
