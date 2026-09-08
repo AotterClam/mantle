@@ -10,6 +10,8 @@ const NO_ASSETS: AdminAssetServer = { fetch: async () => null };
 export interface ConventionalBindingsEnv {
   readonly DB?: D1Database;
   readonly ASSETS?: Fetcher;
+  /** Optional app/environment-owned KV namespace for MCP catalog settings. */
+  readonly MANTLE_KV?: KVNamespace;
 }
 
 export type MantleWorkerBindings = MantleCloudflareConfig["bindings"];
@@ -22,5 +24,8 @@ export function createConventionalBindings(
   return {
     db: new D1DatabaseDriver(env.DB),
     adminAssets: env.ASSETS ? new AssetsAssetServer(env.ASSETS) : NO_ASSETS,
+    ...(env.MANTLE_KV
+      ? { mcpCatalogKv: { namespace: env.MANTLE_KV, scope: "default" } }
+      : {}),
   };
 }

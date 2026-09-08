@@ -79,12 +79,14 @@ export function createMcpApiHandler<Env = Record<string, unknown>>(
       // the tools in tools/list at all. Read this before consulting the
       // dispatcher cache so operator edits to site_config update the
       // MCP catalog without a redeploy/runtime reset.
-      const site = await runtime.siteConfig.load();
+      const site = ref.mcpCatalogSiteConfig
+        ? await ref.mcpCatalogSiteConfig.loadCatalogSite(runtime)
+        : await runtime.siteConfig.load();
       const mediaPurposes = runtime.media ? site.media.purposes : [];
       // Serialise the whole policy set as the cache key — name + required
       // mimes + per-mime maxBytes all participate. Operator edits to any
-      // of these (admin Settings → media taxonomy) rebuild the dispatcher
-      // so tools/list reflects the latest contract without a redeploy.
+      // of these rebuild the dispatcher when the discovery snapshot changes.
+      // Upload authorization still reads the canonical policy on every call.
       const publicUrl = URL.canParse(site.origin) ? site.origin : new URL(request.url).origin;
       const iconBase = `${publicUrl}/`;
       const serverInfo = {

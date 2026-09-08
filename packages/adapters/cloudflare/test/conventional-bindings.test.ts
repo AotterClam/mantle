@@ -32,4 +32,14 @@ describe("createConventionalBindings", () => {
     await expect(bindings.adminAssets?.fetch(new Request("https://site.test/missing"))).resolves.toBeNull();
   });
 
+  it("wires the conventional MANTLE_KV binding to an isolated catalog scope", () => {
+    const MANTLE_KV = {} as KVNamespace;
+
+    expect(createConventionalBindings({ DB, MANTLE_KV }).mcpCatalogKv).toEqual({
+      namespace: MANTLE_KV,
+      scope: "default",
+    });
+    expect(createConventionalBindings({ DB }).mcpCatalogKv).toBeUndefined();
+  });
+
 });

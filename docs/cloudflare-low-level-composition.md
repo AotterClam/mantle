@@ -87,9 +87,11 @@ function assemble(env: Env) {
 }
 ```
 
-Keep the conventional `DB` binding and `nodejs_compat`. CIMD metadata fetches
-also require `global_fetch_strictly_public`; add the Queue producer in
-`wrangler.jsonc`:
+Keep the conventional `DB` binding and `nodejs_compat`. An optional
+deployment-owned `MANTLE_KV` binding lets `createConventionalBindings` maintain
+the MCP catalog's site-settings projection at write time while D1 remains
+canonical. CIMD metadata fetches also require `global_fetch_strictly_public`;
+add the Queue producer in `wrangler.jsonc`:
 
 ```jsonc
 {

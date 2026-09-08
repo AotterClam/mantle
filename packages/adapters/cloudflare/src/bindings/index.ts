@@ -11,6 +11,12 @@ export {
 } from "./conventionalBindings.js";
 export { R2MediaStorage } from "./R2MediaStorage.js";
 export {
+  KvSiteConfigRepository,
+  type McpCatalogKvBinding,
+  type McpCatalogSiteConfig,
+  type McpCatalogSiteConfigReader,
+} from "./KvSiteConfigRepository.js";
+export {
   WorkersQueueHookDispatcher,
   createQueueHandler,
 } from "./WorkersQueueHookDispatcher.js";

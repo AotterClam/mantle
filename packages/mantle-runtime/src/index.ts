@@ -126,7 +126,10 @@ export type {
   LocalePolicyReader,
   UpdateEditableSiteConfigArgs,
 } from "./domain/port/SiteConfigRepository.js";
-export { SqliteMantleStorageAdapter } from "./infrastructure/storage/SqliteMantleStorageAdapter.js";
+export {
+  SqliteMantleStorageAdapter,
+  type SqliteMantleStorageAdapterOptions,
+} from "./infrastructure/storage/SqliteMantleStorageAdapter.js";
 export {
   prepareDeployment,
   type DeploymentPreparationOptions,

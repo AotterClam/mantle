@@ -3,7 +3,7 @@
 Cloudflare Workers adapter for mantle.
 
 This package mounts the runtime on Hono, implements the runtime ports against
-Cloudflare D1 / Workers assets, and owns curated identity/session wiring
+Cloudflare D1 / KV / Workers assets, and owns curated identity/session wiring
 plus MCP OAuth/CIMD. Legacy DCR remains a bounded compatibility path.
 
 This package is prerelease software. Its `package.json` is the exact version
@@ -104,6 +104,44 @@ Core does not create credential or payment tables. See the shipped
 [API and MCP authorization guide](../../../docs/api-mcp-authorization.md) for
 the exact resolver contract, OAuth resource helpers, manifest examples,
 status behavior, OpenAPI reflection, and runnable integration fixture.
+
+### Optional MCP catalog KV projection
+
+Bind a deployment-owned KV namespace as `MANTLE_KV` to avoid a D1 site-settings
+read while assembling each authenticated MCP tool catalog:
+
+```toml
+[[kv_namespaces]]
+binding = "MANTLE_KV"
+id = "<production-namespace-id>"
+preview_id = "<development-namespace-id>"
+```
+
+D1 remains canonical. Runtime preparation and Admin site-setting mutations
+write the caller-independent catalog projection (brand, description, origin,
+icons, and media-purpose policy) to KV after the D1 write commits. Missing,
+invalid, or expired snapshots are repaired from D1; KV failures do not turn a
+committed setting change into a failed request. Tokens, sessions, caller data,
+operator-only settings, and content are never stored in this projection.
+All Cloudflare locations follow Workers KV's eventual-consistency model while
+a write propagates; the one-hour repair deadline prevents an observation from
+remaining authoritative indefinitely.
+
+`createConventionalBindings(env)` detects `MANTLE_KV` automatically. Low-level
+bindings may instead set `mcpCatalogKv: { namespace, scope }`; the scope must be
+a stable deployment-owned identifier and must never be derived from a request.
+
+The shared SQLite storage accepts a `decorateSiteConfigRepository` hook; KV
+serialization and consistency policy belong to this Cloudflare decorator, not
+the runtime. Other adapters can decorate their repositories with their own
+cache implementation. Ordinary site-config, locale, and upload-policy reads
+still delegate to canonical storage; only MCP discovery uses the snapshot.
+
+Direct SQL edits bypass publication. After an out-of-band edit, call the
+decorated repository's `seed(undefined)` to republish persisted state, or allow
+the snapshot's one-hour repair deadline to trigger a reload on the next MCP
+request. Publication failure leaves D1 authoritative and does not suppress the
+public-cache purge.
 
 ## HTTP Dispatch Benchmark
 

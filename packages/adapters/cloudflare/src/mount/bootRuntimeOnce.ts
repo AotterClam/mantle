@@ -10,6 +10,10 @@ import type { AdminAssetServer } from "@aotter/mantle-admin";
 import type { Auth } from "../auth/createAuth.js";
 import type { MantleCloudflareConfig } from "./cmsConfig.js";
 import type { ConsumerCredentialResolver } from "./resolveCaller.js";
+import {
+  KvSiteConfigRepository,
+  type McpCatalogSiteConfigReader,
+} from "../bindings/KvSiteConfigRepository.js";
 
 /**
  * Per-isolate runtime singleton. The cached promise MUST reset on
@@ -25,6 +29,8 @@ export interface MantleRuntimeRef {
   readonly adminAssets?: AdminAssetServer;
   readonly credentialResolver?: ConsumerCredentialResolver;
   readonly jwtBearer?: MantleCloudflareConfig["jwtBearer"];
+  /** Caller-independent catalog reader. MCP invokes this only after auth. */
+  readonly mcpCatalogSiteConfig?: McpCatalogSiteConfigReader;
 }
 
 export type CloudflareMantleRuntime = MantleRuntime & {
@@ -35,13 +41,23 @@ export type CloudflareMantleRuntime = MantleRuntime & {
 export function createMantleRuntimeRef(config: MantleCloudflareConfig): MantleRuntimeRef {
   let booted: Promise<CloudflareMantleRuntime> | null = null;
   let web: MantleWeb | null = null;
-  const storage = new SqliteMantleStorageAdapter(config.bindings.db, config.siteDefaults);
+  let kvSiteConfig: KvSiteConfigRepository | undefined;
+  const mcpCatalogKv = config.bindings.mcpCatalogKv;
+  const storage = new SqliteMantleStorageAdapter(config.bindings.db, config.siteDefaults, {
+    decorateSiteConfigRepository: mcpCatalogKv
+      ? (canonical) => {
+          kvSiteConfig = new KvSiteConfigRepository(canonical, mcpCatalogKv);
+          return kvSiteConfig;
+        }
+      : undefined,
+  });
   return {
     plan: config.plan,
     auth: config.auth,
     adminAssets: config.bindings.adminAssets,
     credentialResolver: config.credentialResolver,
     jwtBearer: config.jwtBearer,
+    ...(kvSiteConfig ? { mcpCatalogSiteConfig: kvSiteConfig } : {}),
     web(runtime): MantleWeb {
       return web ??= createMantleWeb(runtime, {
         templates: config.templates,
