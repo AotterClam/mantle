@@ -390,6 +390,17 @@ async function connectRemoteTail() {
       ws.once("error", () => { clearTimeout(timeout); reject(new Error("native trace connection failed")); });
     });
     ws.send(JSON.stringify({ debug: false }), { mask: false });
+    // The socket can open before edge log subscriptions propagate. Confirm the
+    // actual nonce before sampling; a fixed delay can silently lose cold records.
+    const readyId = randomUUID();
+    for (let attempt = 0; attempt < 30 && !records.has(readyId); attempt++) {
+      const response = await fetch(`${origin}/health`, { headers: { "x-benchmark-key": key, "x-benchmark-layer": "F0",
+        "x-benchmark-request": readyId, cookie: "__benchmark_origin=1" } });
+      await response.arrayBuffer(); assert.equal(response.status, 200, "trace readiness floor");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    assert(records.has(readyId), "native trace subscription delivers a correlated readiness nonce");
+    records.delete(readyId);
     return { records, close };
   } catch (error) { await close(); throw error; }
 }
