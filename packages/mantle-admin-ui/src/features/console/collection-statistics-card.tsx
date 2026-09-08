@@ -49,24 +49,10 @@ export function CollectionStatisticsCard({ collection, canonical }: {
     ? t(language, collection.filter ? "console.stats.other" : "console.stats.new") : fieldLabel(name);
   return (
     <SectionCard className="min-w-0 gap-3 p-4">
-      <div className="flex items-start justify-between gap-2">
-        <a href={`/admin/c/${encodeURIComponent(collection.name)}`} className="group min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <h4 className="text-sm font-medium group-hover:underline">{title}</h4>
-        </a>
-        {data && !query.isError ? <Button asChild variant="ghost" size="icon" className="-mt-1 size-7 shrink-0 text-muted-foreground">
-          <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(statisticsCsv(data, series, preferences.mode))}`}
-            download={`${collection.name}-${preferences.range}-${preferences.mode}.csv`}
-            aria-label={`${title} · ${t(language, "console.stats.download")}`} title={t(language, "console.stats.download")}>
-            <Download className="size-4" aria-hidden />
-          </a>
-        </Button> : null}
-      </div>
-      {data && !query.isError && (
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-3xl font-semibold tabular-nums tracking-tight" aria-label={`${t(language, "console.stats.total")}: ${number.format(data.total)}`} title={t(language, "console.stats.total")}>{number.format(data.total)}</p>
-          <p className="text-xs text-muted-foreground">{t(language, "console.stats.inRange", { count: number.format(series.reduce((sum, row) => sum + row.intervalTotal, 0)) })}</p>
-        </div>
-      )}
+      <h3 className="flex items-baseline justify-between gap-3 text-base font-semibold">
+        <a href={`/admin/c/${encodeURIComponent(collection.name)}`} className="min-w-0 rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{title}</a>
+        {data && !query.isError && <span className="shrink-0 tabular-nums" aria-label={`${t(language, "console.stats.total")}: ${number.format(data.total)}`} title={t(language, "console.stats.total")}>{number.format(data.total)}</span>}
+      </h3>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={preferences.range} onValueChange={(range) => updatePreferences({ ...preferences, range: range as StatisticsPreferences["range"] })}>
           <SelectTrigger className="text-xs" aria-label={`${title} · ${t(language, "console.stats.range")}`}>
@@ -76,9 +62,18 @@ export function CollectionStatisticsCard({ collection, canonical }: {
             {STATISTICS_RANGES.map((range) => <SelectItem value={range} key={range}>{t(language, `console.stats.range.${range}`)}</SelectItem>)}
           </SelectContent>
         </Select>
-        <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label={`${title} · ${t(language, "console.stats.mode")}`}>
-          {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode} aria-label={t(language, `console.stats.${mode}`)} title={t(language, `console.stats.${mode}`)}
-            onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.short.${mode}`)}</Button>)}
+        <div className="flex items-center gap-1">
+          <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label={`${title} · ${t(language, "console.stats.mode")}`}>
+            {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode} aria-label={t(language, `console.stats.${mode}`)} title={t(language, `console.stats.${mode}`)}
+              onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.short.${mode}`)}</Button>)}
+          </div>
+          {data && !query.isError ? <Button asChild variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground">
+            <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(statisticsCsv(data, series, preferences.mode))}`}
+              download={`${collection.name}-${preferences.range}-${preferences.mode}.csv`}
+              aria-label={`${title} · ${t(language, "console.stats.download")}`} title={t(language, "console.stats.download")}>
+              <Download className="size-4" aria-hidden />
+            </a>
+          </Button> : null}
         </div>
       </div>
       {query.isPending ? <Skeleton className="h-40" /> : query.isError ? (
