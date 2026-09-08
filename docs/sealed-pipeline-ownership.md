@@ -59,10 +59,11 @@ auth/guard references, all Trigger surfaces, multi-document YAML, empty
 documents, aliases, unknown keys, malformed YAML, and deterministic
 diagnostics.
 
-Exact downstream sources and their gate authorities are pinned here. The public
-Starter runs in Core CI and release preflight. Private consumers run the same
-exact-tarball checker in their own repositories, so public Core PRs never
-receive cross-repository credentials:
+The following pins record the historical sealed-pipeline migration gates.
+ADR-0021 supersedes the Starter/Landing release coupling: current Core CI and
+release use `docs/examples/minimal-worker` from the same reviewed commit.
+Private consumers can still run the exact-tarball checker in their own repos;
+public Core PRs receive no cross-repository credentials:
 
 | Consumer | Revision | Gate authority | Manifest paths |
 |---|---|---|---|

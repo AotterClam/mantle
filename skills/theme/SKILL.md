@@ -1,6 +1,6 @@
 ---
 name: theme
-description: Apply brand and visual direction in a generated Mantle project using its repo-owned theme and UI contracts.
+description: Apply brand and visual direction in a Mantle application using its repo-owned theme and UI contracts.
 metadata:
   source: "@aotter/mantle"
   sourcePath: skills/theme/SKILL.md
