@@ -31,11 +31,12 @@ const versions = {
   deploymentBlock: process.env.BENCH_BLOCK ?? null,
   configuredPlacement: process.env.BENCH_PLACEMENT ?? null,
 };
-let child, cdp, credentials, dpopCredentials, currentBoot, bundle = null;
+let child, cdp, credentials, dpopCredentials, currentBoot, remoteTail, bundle = null;
 const dpopKey = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
 const jwk = await webcrypto.subtle.exportKey("jwk", dpopKey.publicKey);
 
 try {
+  if (remote) remoteTail = await connectRemoteTail();
   if (!remote) {
     const output = execFileSync("pnpm", ["--filter", "@aotter/mantle-cloudflare", "exec", "wrangler", "deploy", "--dry-run", "--config", config,
       "--outdir", join(persistence, "bundle")], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -187,7 +188,7 @@ try {
   // Never print auth response bodies, credentials, or the wrangler --var value.
   if (logs.length) process.stderr.write(logs.join("").replaceAll(key, "[redacted]").slice(-8000));
   process.exitCode = 1;
-} finally { await stop(); await rm(persistence, { recursive: true, force: true }); }
+} finally { await stop(); await remoteTail?.close(); await rm(persistence, { recursive: true, force: true }); }
 
 async function measure(name, path, options = {}) {
   const ids = [], bodies = [], samples = [];
@@ -318,12 +319,12 @@ async function remoteRecords(ids) {
   const found = new Map(); const deadline = Date.now() + 30000;
   while (Date.now() < deadline && found.size < ids.length) {
     const missing = ids.filter((id) => !found.has(id));
-    const received = await control("records", missing);
+    const received = missing.map((id) => remoteTail.records.get(id) ?? null);
     received.forEach((value, index) => { if (value) found.set(missing[index], value); });
     if (found.size < ids.length) await new Promise((resolve) => setTimeout(resolve, 500));
   }
   assert.equal(found.size, ids.length, "all remote invocations have Tail timing and a correlated record");
-  await control("delete-records", ids);
+  for (const id of ids) remoteTail.records.delete(id);
   return ids.map((id) => found.get(id));
 }
 
@@ -339,7 +340,7 @@ async function probeCache() {
     const sample = { cacheStatus, ttfbMs, fullBodyMs: performance.now() - start, responseBytes: Buffer.byteLength(body),
       cacheControl: response.headers.get("cache-control"), rayColo: response.headers.get("cf-ray")?.split("-").at(-1) ?? null };
     if (cacheStatus === "HIT") {
-      assert.equal((await control("records", [id]))[0], null, "entrypoint HIT has no Worker invocation record");
+      assert.equal((remoteTail.records.get(id) ?? null), null, "entrypoint HIT has no Worker invocation record");
       evidence.push(sample); break;
     }
     sample.originObservation = (await remoteRecords([id]))[0];
@@ -348,4 +349,47 @@ async function probeCache() {
   assert(evidence.some((sample) => sample.cacheStatus === "MISS"), "deployed public cache MISS");
   assert(evidence.some((sample) => sample.cacheStatus === "HIT"), "deployed public cache HIT");
   return evidence;
+}
+
+async function connectRemoteTail() {
+  const account = process.env.BENCH_ACCOUNT_ID;
+  assert(account && /^[a-f0-9]{32}$/.test(account), "BENCH_ACCOUNT_ID required for remote native timing");
+  const script = process.env.BENCH_SCRIPT ?? "mantle-parity-812";
+  assert(/^[a-zA-Z0-9_-]+$/.test(script), "valid benchmark Worker name");
+  const auth = JSON.parse(execFileSync("pnpm", ["--filter", "@aotter/mantle-cloudflare", "exec", "wrangler", "auth", "token",
+    "--profile", process.env.BENCH_PROFILE_NAME ?? "default", "--json"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  assert(auth.token, "Wrangler authentication available");
+  const headers = { authorization: `Bearer ${auth.token}`, "content-type": "application/json" };
+  const url = `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${script}/tails`;
+  const response = await fetch(url, { method: "POST", headers, body: JSON.stringify({ filters: [] }) });
+  const created = await response.json();
+  assert(response.ok && created.success, `native tail creation status ${response.status}`);
+  const WebSocket = createRequire(packageRequire.resolve("wrangler/package.json"))("ws");
+  const ws = new WebSocket(created.result.url, "trace-v1", { headers: { "User-Agent": `wrangler/${versions.wrangler}` } });
+  const records = new Map();
+  const close = async () => { ws.close(); await fetch(`${url}/${created.result.id}`, { method: "DELETE", headers }); };
+  ws.on("message", (data) => {
+    let event; try { event = JSON.parse(String(data)); } catch { return; }
+    if (event.scriptName !== script) return;
+    for (const log of event.logs ?? []) {
+      if (log.message?.[0] !== "mantle-benchmark-v1" || typeof log.message[1] !== "string") continue;
+      let data; try { data = JSON.parse(log.message[1]); } catch { continue; }
+      if (!/^[a-f0-9-]{36}$/i.test(data?.id) || !data.observation) continue;
+      const { record, bootId, colo, country, placement } = data.observation;
+      if (records.size >= 2000) records.delete(records.keys().next().value);
+      records.set(data.id, { record: record ?? null, bootId, colo, country, placement,
+        platform: { source: "Cloudflare real-time trace-v1", cpuTimeMs: Number.isFinite(event.cpuTime) ? event.cpuTime : null,
+          wallTimeMs: Number.isFinite(event.wallTime) ? event.wallTime : null, outcome: event.outcome,
+          timestamp: event.eventTimestamp, scriptVersion: event.scriptVersion?.id ?? null, truncated: event.truncated } });
+    }
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("native trace connection timeout")), 30000);
+      ws.once("open", () => { clearTimeout(timeout); resolve(); });
+      ws.once("error", () => { clearTimeout(timeout); reject(new Error("native trace connection failed")); });
+    });
+    ws.send(JSON.stringify({ debug: false }), { mask: false });
+    return { records, close };
+  } catch (error) { await close(); throw error; }
 }

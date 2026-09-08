@@ -176,26 +176,10 @@ export default {
     bootId ??= crypto.randomUUID();
     const url = new URL(request.url);
     if (url.pathname === "/__health") return Response.json({ bootId, fingerprint: plan.semanticFingerprint, routes: plan.httpRoutes.length, schemas: Object.keys(plan.schemas).length, views: Object.keys(plan.views).length });
-    if (url.pathname === "/__records" || url.pathname === "/__delete-records") {
+    if (url.pathname === "/__records") {
       if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
       const ids: unknown = await request.json();
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every((id) => typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id))) return new Response("invalid ids", { status: 400 });
-      if (url.pathname === "/__delete-records") {
-        if (raw.BENCH_REMOTE_RECORDS === "1") for (let offset = 0; offset < ids.length; offset += 90) {
-          const batch = ids.slice(offset, offset + 90);
-          await raw.DB.prepare(`DELETE FROM __benchmark_records WHERE id IN (${batch.map(() => "?").join(",")})`).bind(...batch).run();
-        }
-        return new Response("ok");
-      }
-      if (raw.BENCH_REMOTE_RECORDS === "1") {
-        const found = new Map<string, unknown>();
-        for (let offset = 0; offset < ids.length; offset += 90) {
-          const batch = ids.slice(offset, offset + 90);
-          const result = await raw.DB.prepare(`SELECT id, value FROM __benchmark_records WHERE id IN (${batch.map(() => "?").join(",")})`).bind(...batch).all<{ id: string; value: string }>();
-          for (const row of result.results) found.set(row.id, JSON.parse(row.value));
-        }
-        return Response.json(ids.map((id) => found.get(id) ?? null));
-      }
       return Response.json(ids.map((id) => { const record = records.get(id); records.delete(id); return record ?? null; }));
     }
     const observed = request.headers.get("x-benchmark-observe") !== "off";
