@@ -43,6 +43,64 @@ Node-based tooling may import `@aotter/mantle-runtime/testing` for the real
 SQLite access-path and HTTP sampling helpers. That subpath is intentionally
 separate from the Worker-safe package entry.
 
+## Storage adapter conformance
+
+Prefer an official adapter when its storage ownership fits your application.
+Implement the existing `MantleStorageAdapter` ports when entries must participate
+in application-owned storage or transactions. Test that implementation with
+`runStorageConformance` from `@aotter/mantle-runtime/testing/storage` before
+upgrading the SDK. This portable subpath works in browsers and server runtimes;
+it imports neither a test framework nor the Node-only `/testing` helpers, and
+the production entry does not import it.
+
+The factory receives a sealed fixture `RuntimePlan` and must prepare a **fresh,
+empty, disposable store for each check**. Return its `PreparedMantleStorage` and
+a cleanup callback. If setup fails before returning, the factory owns cleanup.
+For adapters with locale preparation, configure `en`, `zh-TW`, and `ja`.
+
+For example, the official IndexedDB adapter can run the same contract as a
+host-owned adapter:
+
+```ts
+import { IndexedDbMantleStorageAdapter } from "@aotter/mantle-indexeddb";
+import { runStorageConformance } from "@aotter/mantle-runtime/testing/storage";
+
+const report = await runStorageConformance({
+  async create(plan) {
+    const adapter = new IndexedDbMantleStorageAdapter({
+      databaseName: `conformance-${crypto.randomUUID()}`,
+    });
+    try {
+      return {
+        storage: await adapter.prepare(plan),
+        cleanup: () => adapter.deleteDatabase(),
+      };
+    } catch (error) {
+      await adapter.deleteDatabase();
+      throw error;
+    }
+  },
+});
+if (!report.ok) throw new Error(JSON.stringify(report.failures, null, 2));
+```
+
+Seven checks cover CRUD and replacement updates, concurrent/stale version
+conflicts, guarded status transitions/deletes, nested JSON clone isolation,
+all public read helpers and their field projection, locale/null handling,
+forward/backward cursors with equal timestamps, and declarative View projection,
+parameters, nested `and`/`or`, ordering, and pagination. Cases run sequentially,
+always attempt cleanup, and collect failures as `{ check, phase, message }`;
+`phase` distinguishes setup, assertion, and cleanup failures. A fixture grammar
+or compilation defect rejects the runner before creating storage.
+
+The contract calls prepared storage directly. It does not run Runtime's locale
+validation or lifecycle hooks; null/missing locale fixtures exercise the read
+port's documented behavior. It uses JSON-compatible data, not arbitrary browser
+objects. Native SQL, unique indexes, search, specialized sorts, migrations,
+media/auth, cross-process races, and application transaction/lifecycle semantics
+still need adapter-specific tests. A passing report is a version-specific
+baseline, not certification of every storage feature.
+
 For a fresh adapter implementation, start with
 [`docs/adapter-guide.md`](../../docs/adapter-guide.md) and
 [`docs/adr/0019-sealed-manifest-runtime-pipeline.md`](../../docs/adr/0019-sealed-manifest-runtime-pipeline.md).
