@@ -18,7 +18,7 @@ import { prepareSqliteView } from "../../../../mantle-runtime/src/infrastructure
 import { fixtureAuth } from "./parity-auth.js";
 import planData from "./parity-plan.generated.json" with { type: "json" };
 
-interface Env { DB: D1Database; MANTLE_KV: KVNamespace; MEDIA: R2Bucket; BENCHMARK_KEY: string; BENCH_LOCALES?: string; BENCH_REMOTE_RECORDS?: string; }
+interface Env { DB: D1Database; MANTLE_KV: KVNamespace; MEDIA?: R2Bucket; BENCHMARK_KEY: string; BENCH_LOCALES?: string; BENCH_REMOTE_RECORDS?: string; }
 type Layer = "F0" | "F1" | "F2" | "M";
 const plan = sealRuntimePlan(planData as RuntimePlanData);
 let bootId: string;
@@ -26,7 +26,7 @@ const records = new Map<string, { record: RequestDiagnosticRecord; bootId: strin
 const states = new Map<boolean, ReturnType<typeof createState>>();
 
 function createState(raw: Env, origin: string, observed: boolean) {
-  const env = observed ? { ...raw, DB: instrumentD1(raw.DB), MANTLE_KV: instrumentKv(raw.MANTLE_KV), MEDIA: instrumentR2(raw.MEDIA) } : raw;
+  const env = observed ? { ...raw, DB: instrumentD1(raw.DB), MANTLE_KV: instrumentKv(raw.MANTLE_KV), MEDIA: raw.MEDIA ? instrumentR2(raw.MEDIA) : undefined } : raw;
   const { auth, login } = fixtureAuth(env.DB, origin, env.BENCHMARK_KEY);
   const locales = (env.BENCH_LOCALES ?? "en").split(",");
   const defaults: SiteDefaults = { title: "Synthetic parity", brand: "Parity", origin, locales };
@@ -124,10 +124,10 @@ function createState(raw: Env, origin: string, observed: boolean) {
     }
     return new Response("not found", { status: 404 });
   }
-  const storage = new R2MediaStorage(env.MEDIA, new AwsClient({ accessKeyId: "synthetic", secretAccessKey: "synthetic" }), "https://synthetic.invalid", "https://media.example.test");
+  const storage = env.MEDIA ? new R2MediaStorage(env.MEDIA, new AwsClient({ accessKeyId: "synthetic", secretAccessKey: "synthetic" }), "https://synthetic.invalid", "https://media.example.test") : null;
   return { env, worker, auth, login, locales, async fetch(layer: Layer, request: Request, ctx: ExecutionContext) {
     const path = new URL(request.url).pathname;
-    if (path === "/r2") return r2(request, env.MEDIA, storage, layer);
+    if (path === "/r2") return env.MEDIA && storage ? r2(request, env.MEDIA, storage, layer) : new Response("R2 unavailable", { status: 503 });
     if (layer === "M") return worker.fetch(request, env, ctx);
     const response = layer === "F0" ? new Response("ok") : layer === "F1" ? await hono.fetch(request, env, ctx) : await native(request, ctx);
     return applyCachePolicy(request, response);
@@ -181,15 +181,20 @@ export default {
       const ids: unknown = await request.json();
       if (!Array.isArray(ids) || ids.length > 1000 || !ids.every((id) => typeof id === "string" && /^[a-f0-9-]{36}$/i.test(id))) return new Response("invalid ids", { status: 400 });
       if (url.pathname === "/__delete-records") {
-        if (raw.BENCH_REMOTE_RECORDS === "1") await raw.MEDIA.delete(ids.map((id) => `_benchmark/records/${id}.json`));
+        if (raw.BENCH_REMOTE_RECORDS === "1") for (let offset = 0; offset < ids.length; offset += 90) {
+          const batch = ids.slice(offset, offset + 90);
+          await raw.DB.prepare(`DELETE FROM __benchmark_records WHERE id IN (${batch.map(() => "?").join(",")})`).bind(...batch).run();
+        }
         return new Response("ok");
       }
       if (raw.BENCH_REMOTE_RECORDS === "1") {
-        const found: unknown[] = [];
-        for (let offset = 0; offset < ids.length; offset += 6) found.push(...await Promise.all(ids.slice(offset, offset + 6).map(async (id) => {
-          const object = await raw.MEDIA.get(`_benchmark/records/${id}.json`); return object ? object.json() : null;
-        })));
-        return Response.json(found);
+        const found = new Map<string, unknown>();
+        for (let offset = 0; offset < ids.length; offset += 90) {
+          const batch = ids.slice(offset, offset + 90);
+          const result = await raw.DB.prepare(`SELECT id, value FROM __benchmark_records WHERE id IN (${batch.map(() => "?").join(",")})`).bind(...batch).all<{ id: string; value: string }>();
+          for (const row of result.results) found.set(row.id, JSON.parse(row.value));
+        }
+        return Response.json(ids.map((id) => found.get(id) ?? null));
       }
       return Response.json(ids.map((id) => { const record = records.get(id); records.delete(id); return record ?? null; }));
     }
@@ -220,6 +225,7 @@ export default {
         return Response.json({ rows, bytes, locales: current.locales.length });
       }
       if (url.pathname === "/__r2seed") {
+        if (!raw.MEDIA) return new Response("R2 unavailable", { status: 503 });
         const bytes = Math.min(4 * 1024 * 1024, Math.max(1, Number(body.bytes) || 1024));
         for (const spec of variants(12, bytes)) await raw.MEDIA.put(spec.storageKey, new Uint8Array(bytes), { httpMetadata: { contentType: spec.mimeType } });
         return Response.json({ bytes });
@@ -240,7 +246,7 @@ export default {
       if (id && raw.BENCH_REMOTE_RECORDS === "1") console.log("mantle-benchmark-v1", JSON.stringify({ id, observation: observation(null) }));
       return response;
     }
-    return runWithRequestDiagnostics({ surface, bindings: { d1: true, kv: true, r2: true } }, run, (record) => {
+    return runWithRequestDiagnostics({ surface, bindings: { d1: true, kv: true, r2: !!raw.MEDIA } }, run, (record) => {
       if (!id) return;
       if (raw.BENCH_REMOTE_RECORDS === "1") {
         console.log("mantle-benchmark-v1", JSON.stringify({ id, observation: observation(record) }));

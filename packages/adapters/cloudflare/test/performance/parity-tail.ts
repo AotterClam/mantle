@@ -1,6 +1,6 @@
 /** Synthetic benchmark sink. Never stores request headers, bodies or exceptions. */
 export default {
-  async tail(events: TraceItem[], env: { MEDIA: R2Bucket; BENCH_SCRIPT?: string }) {
+  async tail(events: TraceItem[], env: { DB: D1Database; BENCH_SCRIPT?: string }) {
     const writes: { id: string; value: string }[] = [];
     for (const event of events) {
       if (event.scriptName !== (env.BENCH_SCRIPT ?? "mantle-parity-812")) continue;
@@ -16,7 +16,7 @@ export default {
             outcome: event.outcome, timestamp: event.eventTimestamp, scriptVersion: event.scriptVersion?.id ?? null, truncated: event.truncated } }) });
       }
     }
-    for (let offset = 0; offset < writes.length; offset += 6) await Promise.all(writes.slice(offset, offset + 6)
-      .map(({ id, value }) => env.MEDIA.put(`_benchmark/records/${id}.json`, value, { httpMetadata: { contentType: "application/json" } })));
+    for (let offset = 0; offset < writes.length; offset += 50) await env.DB.batch(writes.slice(offset, offset + 50)
+      .map(({ id, value }) => env.DB.prepare("INSERT OR REPLACE INTO __benchmark_records (id, value) VALUES (?, ?)").bind(id, value)));
   },
 };

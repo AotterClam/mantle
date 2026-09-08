@@ -4,5 +4,11 @@
   "main": "./parity-tail.ts",
   "compatibility_date": "2026-07-08",
   "workers_dev": false,
-  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "mantle-parity-812" }]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mantle-parity-812",
+      "database_id": "00000000-0000-0000-0000-000000000812"
+    }
+  ]
 }
