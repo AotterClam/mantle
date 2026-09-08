@@ -664,3 +664,10 @@ pnpm --filter @aotter/mantle-cloudflare exec vitest run \
 contains all four scenarios and the exact public API names used by the fixture.
 The package typecheck catches changes to those APIs; the integration test
 catches changes to REST/MCP enforcement and mutable guard behavior.
+
+The canonical MCP grant check joins the JWT's exact consent and original
+session in one indexed D1 statement. Both identities, their user/client
+bindings, session expiration, resource and the complete token scope set must
+still match. The adapter then reads the user's role on every protected request;
+no grant or role result is cached. With warm JWKS, this is one grant binding
+call plus one role binding call, excluding DPoP replay, catalog and tool work.
