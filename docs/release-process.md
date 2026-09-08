@@ -1,6 +1,6 @@
 # Release process
 
-Mantle remains prerelease software until the stable v0.1.0 gate closes.
+Mantle remains prerelease software until the first stable v0.1.2 gate closes.
 Published package versions, Git tags, GitHub releases, and Starter tags are
 immutable: repair a bad release with the next version, never by replacing
 public state.
@@ -87,8 +87,8 @@ rollback or unpublish behavior, or deploy Landing unless
 - npm dist-tags follow the suffix: `alpha`, `beta`, `rc`, or `latest` for
   stable versions.
 - During the legacy `0.0.x-alpha` cadence, `latest` follows the current alpha.
-  The final `0.1.0-alpha.N` candidates advance only `alpha`; `latest` moves to
-  `0.1.0` after the stable gate passes.
+  The final `0.1.0-alpha.N` candidates advance only `alpha`; `latest` advances to the first stable `0.1.2` after its gate passes.
+  Do not roll back an existing legacy `latest` value.
 
 ## Release PR
 
@@ -252,3 +252,14 @@ deployment was started.
 - A cross-cutting rename must include an explicit infrastructure-config diff
   and live smoke test. CI success does not prove renamed Worker, D1, KV, route,
   or secret bindings are correct.
+
+## Final legacy release and next stable target
+
+Owner decision (2026-09-08): `0.1.0-alpha.17` closes the legacy Landing/Starter
+product line. Pin the existing Landing packages, Core deployment SHA and Starter
+refs to that release, and retain immutable Starter tags for existing consumers.
+No stable `0.1.0` release is planned. Issue #621 is superseded, not a claim that
+its former production soak passed. First stable targets milestone `0.1.2`, with
+new acceptance covering identity isolation, safe updates and retained production
+stability after the breaking architecture is settled. Retiring Starter launch
+is tracked by #786; the separate landing-next repository is out of this release.
