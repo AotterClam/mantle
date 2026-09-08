@@ -45,15 +45,14 @@ import {
  * # Multi-variant (#272)
  *
  * `createUpload` produces one presigned PUT URL per declared variant;
- * `commitUpload` HEAD-verifies every one. Storage keys are scoped
+ * `commitUpload` verifies and streams every object through a metadata rewrite. Storage keys are scoped
  * under a shared `<uploadGroupId>/` prefix so operators can eyeball
  * the variant set in R2 dashboards, and the orphan sweeper (#254)
  * can identify partially-committed groups by listing the prefix.
  *
  * Optimization runs agent-side in the MCP client's runtime. The
  * Worker never decodes / re-encodes bytes — it only verifies content-
- * type + size on the metadata returned by R2's HEAD-equivalent path
- * (`bucket.get` + `httpMetadata`).
+ * type + size from `bucket.get` before streaming the metadata-rewrite PUT.
  *
  * # Future: private bucket adapter
  *
@@ -144,17 +143,12 @@ export class R2MediaStorage implements MediaStorage {
   }
 
   async commitUpload(args: CommitUploadArgs): Promise<MediaAsset> {
-    const variants: MediaVariant[] = [];
-    for (const spec of args.variants) {
-      variants.push(await this.verifyAndCommitVariant(args, spec));
-    }
-
     // Enforce the asset-shape invariant the renderer depends on. The
     // use case already validated this at create time; this is a
     // belt-and-suspenders check at the adapter-side commit path.
     // Exactly one primary, no duplicated (mime, role) pair (the latter
     // would have already collided on storage key in createUpload).
-    const primaries = variants.filter((v) => v.role === "primary");
+    const primaries = args.variants.filter((v) => v.role === "primary");
     if (primaries.length !== 1) {
       throw new DiagnosticError(
         makeDiagnostic({
@@ -163,12 +157,12 @@ export class R2MediaStorage implements MediaStorage {
           severity: "error",
           path: "adapter/R2MediaStorage/commitUpload",
           expected: "exactly one variant with role='primary'",
-          value: variants.map((v) => v.role).join(","),
+          value: args.variants.map((v) => v.role).join(","),
         }),
       );
     }
     const seenKey = new Set<string>();
-    for (const v of variants) {
+    for (const v of args.variants) {
       const key = `${v.mimeType}/${v.role}`;
       if (seenKey.has(key)) {
         throw new DiagnosticError(
@@ -183,6 +177,18 @@ export class R2MediaStorage implements MediaStorage {
         );
       }
       seenKey.add(key);
+    }
+
+    const variants: MediaVariant[] = [];
+    // At most three GET streams and three corresponding PUTs per invocation.
+    // Settle the whole batch before returning an error or starting another.
+    for (let offset = 0; offset < args.variants.length; offset += 3) {
+      const results = await Promise.allSettled(args.variants.slice(offset, offset + 3)
+        .map((spec) => this.verifyAndCommitVariant(args, spec)));
+      for (const result of results) {
+        if (result.status === "rejected") throw result.reason;
+        variants.push(result.value);
+      }
     }
 
     return {
@@ -215,42 +221,50 @@ export class R2MediaStorage implements MediaStorage {
     const existing = await this.bucket.get(spec.storageKey);
     if (!existing) throw mediaDiagnostic("MEDIA_OBJECT_NOT_FOUND", { value: args.uploadGroupId });
 
-    const actualMime = existing.httpMetadata?.contentType ?? "application/octet-stream";
-    if (actualMime !== spec.mimeType) {
-      throw mediaDiagnostic("MEDIA_MIME_REJECTED", {
-        value: actualMime,
-        expected: spec.mimeType,
+    try {
+      const actualMime = existing.httpMetadata?.contentType ?? "application/octet-stream";
+      if (actualMime !== spec.mimeType) {
+        throw mediaDiagnostic("MEDIA_MIME_REJECTED", {
+          value: actualMime,
+          expected: spec.mimeType,
+        });
+      }
+      if (existing.size > spec.maxBytes) {
+        throw mediaDiagnostic("MEDIA_VARIANT_SIZE_EXCEEDED", {
+          value: { mimeType: spec.mimeType, byteSize: existing.size },
+          expected: `${spec.mimeType} byteSize <= ${spec.maxBytes}`,
+        });
+      }
+
+      const customMetadata: Record<string, string> = {
+        ...existing.customMetadata,
+        committedAt: String(args.now),
+        role: spec.role,
+        uploadGroupId: args.uploadGroupId,
+        filename: args.filename,
+      };
+      if (args.alt) customMetadata["alt"] = args.alt;
+      if (args.caption) customMetadata["caption"] = args.caption;
+
+      const committed = await this.bucket.put(spec.storageKey, existing.body, {
+        httpMetadata: { contentType: actualMime },
+        customMetadata,
       });
+      if (!committed) throw new Error("R2 metadata commit did not store the object.");
+
+      return {
+        mimeType: actualMime,
+        publicUrl: `${this.publicBase}/${spec.storageKey}`,
+        storageKey: spec.storageKey,
+        byteSize: existing.size,
+        role: spec.role,
+      };
+    } catch (error) {
+      // Validation may reject before PUT takes ownership of the GET stream.
+      // A failed PUT may already have consumed/errored it; preserve the cause.
+      await existing.body.cancel().catch(() => {});
+      throw error;
     }
-    if (existing.size > spec.maxBytes) {
-      throw mediaDiagnostic("MEDIA_VARIANT_SIZE_EXCEEDED", {
-        value: { mimeType: spec.mimeType, byteSize: existing.size },
-        expected: `${spec.mimeType} byteSize <= ${spec.maxBytes}`,
-      });
-    }
-
-    const customMetadata: Record<string, string> = {
-      ...existing.customMetadata,
-      committedAt: String(args.now),
-      role: spec.role,
-      uploadGroupId: args.uploadGroupId,
-      filename: args.filename,
-    };
-    if (args.alt) customMetadata["alt"] = args.alt;
-    if (args.caption) customMetadata["caption"] = args.caption;
-
-    await this.bucket.put(spec.storageKey, existing.body, {
-      httpMetadata: { contentType: actualMime },
-      customMetadata,
-    });
-
-    return {
-      mimeType: actualMime,
-      publicUrl: `${this.publicBase}/${spec.storageKey}`,
-      storageKey: spec.storageKey,
-      byteSize: existing.size,
-      role: spec.role,
-    };
   }
 
   /** Object keys are server-generated. Layout:

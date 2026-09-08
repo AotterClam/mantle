@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AwsClient } from "aws4fetch";
-import type { IdGenerator } from "@aotter/mantle-runtime";
+import { createMantleRuntime, prepareDeployment, SqliteMantleStorageAdapter, type CommitUploadArgs, type IdGenerator } from "@aotter/mantle-runtime";
+import { sqliteD1 } from "./fakes/sqlite-d1.js";
+import { D1DatabaseDriver } from "../src/bindings/D1DatabaseDriver.js";
+import { compileTestPlan } from "./compileTestPlan.js";
 import { R2MediaStorage } from "../src/bindings/R2MediaStorage.js";
 
 /**
@@ -192,7 +195,7 @@ describe("R2MediaStorage.createUpload (multi-variant)", () => {
 });
 
 describe("R2MediaStorage.commitUpload (multi-variant)", () => {
-  it("happy path: HEAD-verifies every variant, stamps committedAt/role, returns full MediaAsset", async () => {
+  it("happy path: verifies and rewrites every variant, stamps committedAt/role, returns full MediaAsset", async () => {
     const { storage, state } = makeStorage();
     seedObject(state, "post-cover/asset-abc/alternate.avif", { size: 60_000, contentType: "image/avif" });
     seedObject(state, "post-cover/asset-abc/alternate.webp", { size: 80_000, contentType: "image/webp" });
@@ -305,5 +308,125 @@ describe("R2MediaStorage.deleteObject", () => {
     const { storage, state } = makeStorage();
     await storage.deleteObject({ storageKey: "post-cover/asset-abc/primary.jpg" });
     expect(state.deletes).toEqual(["post-cover/asset-abc/primary.jpg"]);
+  });
+});
+
+function measuredCommit(count: number, bytes: number) {
+  const active = new Set<string>();
+  const stored = new Map<string, Record<string, string>>();
+  const metric = { gets: 0, puts: 0, writtenBytes: 0, maxInFlight: 0, cancelled: 0 };
+  let failKey: string | undefined;
+  const args: CommitUploadArgs = {
+    uploadGroupId: "measured", filename: "test.jpg", now: NOW,
+    variants: Array.from({ length: count }, (_, index) => ({
+      storageKey: `measured/${index}`, mimeType: `image/test-${index}`,
+      role: index === 0 ? "primary" : "alternate", maxBytes: bytes,
+    })),
+  };
+  const bucket = {
+    get: async (key: string) => {
+      metric.gets++;
+      active.add(key);
+      metric.maxInFlight = Math.max(metric.maxInFlight, active.size);
+      let sent = false;
+      return {
+        size: bytes, httpMetadata: { contentType: args.variants.find((v) => v.storageKey === key)!.mimeType },
+        customMetadata: stored.get(key) ?? { legacy: "retained" },
+        body: new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent) controller.close();
+            else { sent = true; controller.enqueue(new Uint8Array(bytes)); }
+          },
+          cancel() { metric.cancelled++; active.delete(key); },
+        }),
+      };
+    },
+    put: async (key: string, body: ReadableStream<Uint8Array>, options: R2PutOptions) => {
+      metric.puts++;
+      if (key === failKey) throw new Error("R2 write failed");
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          metric.writtenBytes += chunk.value.byteLength;
+        }
+      } finally { reader.releaseLock(); }
+      active.delete(key);
+      stored.set(key, options.customMetadata!);
+      return {};
+    },
+  } as unknown as R2Bucket;
+  const storage = new R2MediaStorage(bucket, new AwsClient({ accessKeyId: "test", secretAccessKey: "test" }),
+    "https://example.test", "https://media.example.test");
+  return { storage, args, metric, active, stored, fail: (key: string | undefined) => { failKey = key; } };
+}
+
+describe("R2 commit resource budget", () => {
+  it.each([[1, 1024], [3, 65536], [12, 262144]])("bounds %i variants of %i bytes without changing rewrite cost", async (count, bytes) => {
+    const { storage, args, metric, active, stored } = measuredCommit(count, bytes);
+    const asset = await storage.commitUpload(args);
+    expect(asset.variants.map((v) => v.storageKey)).toEqual(args.variants.map((v) => v.storageKey));
+    expect(metric).toEqual({ gets: count, puts: count, writtenBytes: count * bytes, maxInFlight: Math.min(3, count), cancelled: 0 });
+    expect(active.size).toBe(0);
+    for (const metadata of stored.values()) expect(metadata).toMatchObject({ legacy: "retained", committedAt: String(NOW), uploadGroupId: "measured" });
+  });
+
+  it("waits for started variants, cancels failed streams and allows a complete retry", async () => {
+    const measured = measuredCommit(12, 1024);
+    measured.fail("measured/1");
+    await expect(measured.storage.commitUpload(measured.args)).rejects.toThrow("R2 write failed");
+    expect(measured.metric.gets).toBe(3);
+    expect(measured.metric.maxInFlight).toBe(3);
+    expect(measured.metric.cancelled).toBe(1);
+    expect(measured.active.size).toBe(0);
+    expect(measured.stored.size).toBe(2);
+    measured.fail(undefined);
+    expect((await measured.storage.commitUpload(measured.args)).variants).toHaveLength(12);
+    expect(measured.stored.size).toBe(12);
+    expect(measured.active.size).toBe(0);
+  });
+
+  it("does not publish a D1 asset on partial R2 failure and keeps pending state retryable", async () => {
+    const measured = measuredCommit(3, 1024);
+    const { db, sqlite } = sqliteD1();
+    try {
+      const prepared = await prepareDeployment(compileTestPlan([]), new SqliteMantleStorageAdapter(new D1DatabaseDriver(db)));
+      const storage = prepared.storage;
+      await storage.pendingUploads!.save("measured", {
+        purpose: "fixture", filename: "test.jpg", createdAt: NOW, expiresAt: NOW + 60000,
+        variants: measured.args.variants.map((spec) => ({ ...spec, expectedSize: 1024 })),
+      });
+      const runtime = createMantleRuntime({ prepared, ports: { mediaStorage: measured.storage, clock: { now: () => NOW } } });
+      const commit = runtime.media!.commitUpload;
+      measured.fail("measured/1");
+      await expect(commit.execute({ uploadGroupId: "measured" })).rejects.toThrow("R2 write failed");
+      expect(await storage.mediaAssets!.findById("measured")).toBeNull();
+      expect(await storage.pendingUploads!.findById("measured")).not.toBeNull();
+      measured.fail(undefined);
+      await commit.execute({ uploadGroupId: "measured" });
+      expect((await storage.mediaAssets!.findById("measured"))!.variants).toHaveLength(3);
+      expect(await storage.pendingUploads!.findById("measured")).toBeNull();
+    } finally { sqlite.close(); }
+  });
+
+  it("cancels a validation failure and rejects invalid asset shape before I/O", async () => {
+    const measured = measuredCommit(1, 1024);
+    await expect(measured.storage.commitUpload({ ...measured.args,
+      variants: [{ ...measured.args.variants[0]!, maxBytes: 1 }],
+    })).rejects.toMatchObject({ diagnostic: { code: "MEDIA_VARIANT_SIZE_EXCEEDED" } });
+    expect(measured.metric.cancelled).toBe(1);
+    expect(measured.active.size).toBe(0);
+    const get = vi.fn();
+    const storage = new R2MediaStorage({ get } as unknown as R2Bucket,
+      new AwsClient({ accessKeyId: "test", secretAccessKey: "test" }), "https://example.test", "https://media.example.test");
+    for (const variants of [[], [{ ...measured.args.variants[0]!, role: "alternate" as const }],
+      [measured.args.variants[0]!, measured.args.variants[0]!],
+      [measured.args.variants[0]!, { ...measured.args.variants[0]!, role: "alternate" as const }, { ...measured.args.variants[0]!, role: "alternate" as const }],
+    ]) {
+      await expect(storage.commitUpload({ ...measured.args, variants }))
+        .rejects.toMatchObject({ diagnostic: { code: "MEDIA_VARIANTS_INCOMPLETE" } });
+    }
+    expect(get).not.toHaveBeenCalled();
   });
 });
