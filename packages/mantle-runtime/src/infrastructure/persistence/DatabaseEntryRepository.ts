@@ -1,5 +1,6 @@
 import {
   schemaIndexedFieldSql,
+  checkSchemaAdminUi,
   type ContentState,
   type Entry,
   type SchemaManifest,
@@ -17,6 +18,8 @@ import type {
 } from "../../domain/port/EntryRepository.js";
 import type {
   EntryReader,
+  CreationStatisticsArgs,
+  CreationStatistics,
   FindManyEntriesByDataFieldArgs,
   ReadEntriesByDataFieldInArgs,
   ReadEntryByDataFieldArgs,
@@ -61,6 +64,31 @@ export class DatabaseEntryRepository implements EntryRepository, EntryReader {
     private readonly db: DatabaseDriver,
     private readonly schemasByName: ReadonlyMap<string, SchemaManifest> = new Map(),
   ) {}
+
+  async readCreationStatistics(args: CreationStatisticsArgs): Promise<CreationStatistics> {
+    const { collection, from, to, bucketMs } = args;
+    if (![from, to, bucketMs].every(Number.isSafeInteger) || from < 0 || to <= from ||
+        bucketMs <= 0 || to - from > 20 * 86_400_000 || Math.ceil((to - from) / bucketMs) > 480) {
+      throw new RangeError("Statistics require a positive window <= 20 days and <= 480 buckets.");
+    }
+    const schema = this.schemasByName.get(collection);
+    const filter = schema ? checkSchemaAdminUi(schema).filter : null;
+    const field = filter && schema ? schemaIndexedFieldSql(schema, filter.field) : null;
+    // Group unrecognized values together in SQL: corrupt/legacy rows cannot make
+    // the result unbounded. All identifiers come from the prepared schema.
+    const subtype = field
+      ? `CASE WHEN ${field} IN (SELECT value FROM json_each(?)) THEN ${field} ELSE NULL END`
+      : "NULL";
+    const rows = await this.db.prepare(`
+      SELECT -1 AS bucket, NULL AS subtype, COUNT(*) AS count FROM entries WHERE collection = ?
+      UNION ALL
+      SELECT CAST((created_at - ?) / ? AS INTEGER) AS bucket, ${subtype} AS subtype, COUNT(*) AS count
+      FROM entries WHERE collection = ? AND created_at >= ? AND created_at < ?
+      GROUP BY bucket, subtype
+    `).bind(collection, from, bucketMs, ...(field ? [JSON.stringify(filter!.values)] : []), collection, from, to)
+      .all<{ bucket: number; subtype: string | null; count: number }>();
+    return { total: rows[0]!.count, buckets: rows.slice(1) };
+  }
 
   async create(args: CreateEntryArgs): Promise<EntryRow> {
     try {

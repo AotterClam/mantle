@@ -61,7 +61,26 @@ export interface FindManyEntriesByDataFieldArgs {
  * mutation hooks. Public results are projected to spec `Entry`, so persistence
  * fields such as `authorId` cannot leak into templates or public helpers.
  */
+export interface CreationStatisticsArgs {
+  readonly collection: string;
+  readonly from: number;
+  readonly to: number;
+  readonly bucketMs: number;
+}
+
+/** Current retained rows, all statuses; not a historical inventory/event log. */
+export interface CreationStatistics {
+  readonly total: number;
+  readonly buckets: readonly {
+    readonly bucket: number;
+    readonly subtype: string | null;
+    readonly count: number;
+  }[];
+}
+
 export interface EntryReader {
+  /** Optional native aggregation; absence must not trigger a full entry scan in callers. */
+  readCreationStatistics?(args: CreationStatisticsArgs): Promise<CreationStatistics>;
   readById(id: string): Promise<Entry | null>;
   readBySlug(args: ReadEntryBySlugArgs): Promise<Entry | null>;
   readByDataField(args: ReadEntryByDataFieldArgs): Promise<Entry | null>;

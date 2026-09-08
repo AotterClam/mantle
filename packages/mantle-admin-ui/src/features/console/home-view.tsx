@@ -2,14 +2,11 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
-  ChevronRight,
   Database,
   ExternalLink,
   Globe,
 } from "lucide-react";
 import { api } from "../../lib/api";
-import { fieldLabel } from "../../lib/field-label";
-import { resolveLocalizedText } from "../../lib/localized-text";
 import type { Collection, SiteInfo } from "../../lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +18,8 @@ import { t } from "../../app/i18n";
 const CLAUDE_CUSTOMIZE_URL =
   "https://claude.ai/customize/connectors?modal=add-custom-connector";
 const CLAUDE_NEW_CHAT_URL = "https://claude.ai/new";
+
+import { CollectionStatisticsCard } from "./collection-statistics-card";
 
 export function HomeView(): React.ReactElement {
   const { language } = usePreferences();
@@ -153,9 +152,7 @@ export function HomeView(): React.ReactElement {
       ) : null}
 
       <section aria-labelledby="collections-heading">
-        <h2 id="collections-heading" className="mb-4 text-xl font-semibold">
-          {t(language, "console.collections.title")}
-        </h2>
+        <h2 id="collections-heading" className="mb-4 text-xl font-semibold">{t(language, "console.collections.title")}</h2>
 
         {collectionsQuery.isLoading && (
           <div className="space-y-2">
@@ -173,56 +170,16 @@ export function HomeView(): React.ReactElement {
           />
         )}
         {primaryCollections.length > 0 && (
-          <SectionCard className="overflow-hidden p-0">
-            {collectionGroups.map((group, groupIndex) => (
-              <div key={group.title} className={groupIndex > 0 ? "border-t" : undefined}>
-                <h3 className="border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
-                  {group.title}
-                </h3>
-                <div className="divide-y">
-                  {group.items.map((collection) => {
-                    const title =
-                      resolveLocalizedText(collection.title, language, canonical) ??
-                      fieldLabel(collection.name);
-                    const description = resolveLocalizedText(
-                      collection.description,
-                      language,
-                      canonical,
-                    );
-                    const showName =
-                      title.toLocaleLowerCase() !==
-                      fieldLabel(collection.name).toLocaleLowerCase();
-                    return (
-                      <a
-                        key={collection.name}
-                        href={`/admin/c/${encodeURIComponent(collection.name)}`}
-                        className="grid min-h-16 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                            <span className="truncate font-medium">{title}</span>
-                            {showName ? (
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {collection.name}
-                              </span>
-                            ) : null}
-                          </div>
-                          {description ? (
-                            <p className="truncate text-sm text-muted-foreground">
-                              {description}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-                        </div>
-                      </a>
-                    );
-                  })}
+          <div className="space-y-6">
+            {collectionGroups.map((group) => (
+              <div key={group.title}>
+                {collectionGroups.length > 1 && <h3 className="mb-3 text-sm font-medium text-muted-foreground">{group.title}</h3>}
+                <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
+                  {group.items.map((collection) => <CollectionStatisticsCard key={collection.name} collection={collection} canonical={canonical} />)}
                 </div>
               </div>
             ))}
-          </SectionCard>
+          </div>
         )}
       </section>
     </div>
