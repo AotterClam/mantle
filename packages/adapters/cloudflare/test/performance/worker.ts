@@ -179,7 +179,7 @@ async function seed(env: Env, until: number): Promise<Response> {
           title: `Post ${index}`,
           body: `Fixture row ${index}`,
         }),
-        index,
+        Date.now() - (index % 20) * 86_400_000 - 60_000,
         index,
       ));
       for (const collection of ["comments", "reactions", "audits"]) {

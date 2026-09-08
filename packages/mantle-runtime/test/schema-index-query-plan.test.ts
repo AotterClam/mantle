@@ -1062,3 +1062,68 @@ describe("EntryReader against crowded real SQLite", () => {
     expect(entryReads[1]?.params.slice(3, 98)).toEqual(values.slice(95, 190));
   });
 });
+
+describe("collection creation statistics", () => {
+  const statsSchema = {
+    apiVersion: "cms.mantle.aotter.net/v1", kind: "Schema", metadata: { name: "events" },
+    spec: { title: "Events", lifecycle: "operational", schema: { type: "object", properties: {
+      kind: { type: "string", enum: ["sale", "purchase"] }, payload: { type: "string" },
+    } }, indexes: [["kind"]], uiSchema: { list: { filterField: "kind" } } },
+  } as SchemaManifest;
+
+  it("counts retained rows, respects half-open buckets and immediately reflects subtype edits/deletes", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      for (const migration of CANONICAL_MIGRATIONS) sqlite.exec(migration.sql);
+      for (const migration of schemaIndexMigrations([statsSchema])) sqlite.exec(migration.sql);
+      const executions: RecordedExecution[] = [];
+      const repository = new DatabaseEntryRepository(createSqliteDriver(sqlite, executions), new Map([["events", statsSchema]]));
+      for (const [id, now, kind] of [["before", 9, "sale"], ["start", 10, "sale"], ["middle", 20, "purchase"], ["last", 29, "legacy"], ["end", 30, "sale"]] as const) {
+        await repository.create({ id, now, collection: "events", status: "draft", data: { kind }, authorId: null });
+      }
+      await repository.create({ id: "foreign", now: 15, collection: "another", status: "published", data: {}, authorId: null });
+      const args = { collection: "events", from: 10, to: 30, bucketMs: 10 };
+      expect(await repository.readCreationStatistics(args)).toEqual({ total: 5, buckets: [
+        { bucket: 0, subtype: "sale", count: 1 }, { bucket: 1, subtype: null, count: 1 }, { bucket: 1, subtype: "purchase", count: 1 },
+      ] });
+      const execution = executions.at(-1)!;
+      const plan = executionPlanDetails(sqlite, execution);
+      expect(plan.some((line) => /entries_by_collection_created.*created_at>.*created_at</.test(line))).toBe(true);
+      await repository.update({ id: "start", collection: "events", expectedVersion: 1, now: 35, data: { kind: "purchase" } });
+      await repository.delete({ id: "middle", collection: "events", expectedStatus: "draft", expectedVersion: 1 });
+      expect(await repository.readCreationStatistics(args)).toEqual({ total: 4, buckets: [
+        { bucket: 0, subtype: "purchase", count: 1 }, { bucket: 1, subtype: null, count: 1 },
+      ] });
+      expect(await repository.readCreationStatistics({ ...args, collection: "empty" })).toEqual({ total: 0, buckets: [] });
+      expect(await repository.readCreationStatistics({ ...args, collection: "another" })).toEqual({ total: 1, buckets: [{ bucket: 0, subtype: null, count: 1 }] });
+      for (const invalid of [{ bucketMs: 0 }, { to: 10 }, { to: 30.5 }, { from: -1 }, { to: 2e9 }, { to: 1000, bucketMs: 1 }]) {
+        await expect(repository.readCreationStatistics({ ...args, ...invalid })).rejects.toThrow(RangeError);
+      }
+    } finally { sqlite.close(); }
+  });
+
+  it("aggregates 50,000 4-KiB entries into bounded counts in one statement", async () => {
+    const sqlite = new DatabaseSync(":memory:");
+    try {
+      for (const migration of CANONICAL_MIGRATIONS) sqlite.exec(migration.sql);
+      for (const migration of schemaIndexMigrations([statsSchema])) sqlite.exec(migration.sql);
+      const insert = sqlite.prepare("INSERT INTO entries VALUES (?, 'events', 'published', 1, ?, NULL, ?, ?)");
+      const payloads = ["sale", "purchase"].map((kind) => JSON.stringify({ kind, payload: "x".repeat(4096) }));
+      const now = 2_000_000_000;
+      sqlite.exec("BEGIN");
+      for (let i = 0; i < 50_000; i++) insert.run(String(i), payloads[i % 2]!, now - (i % 20) * 86_400_000 - 1, now);
+      sqlite.exec("COMMIT");
+      const executions: RecordedExecution[] = [];
+      const repository = new DatabaseEntryRepository(createSqliteDriver(sqlite, executions), new Map([["events", statsSchema]]));
+      const started = performance.now();
+      const result = await repository.readCreationStatistics({ collection: "events", from: now - 20 * 86_400_000, to: now, bucketMs: 86_400_000 });
+      const milliseconds = performance.now() - started;
+      expect(result.total).toBe(50_000);
+      expect(result.buckets.reduce((sum, row) => sum + row.count, 0)).toBe(50_000);
+      expect(result.buckets.length).toBeLessThanOrEqual(40);
+      expect(JSON.stringify(result).length).toBeLessThan(4000);
+      expect(executions).toHaveLength(1);
+      console.info(JSON.stringify({ benchmark: "home-statistics", rows: 50_000, payloadBytes: 4096, milliseconds, returnedBuckets: result.buckets.length, responseBytes: JSON.stringify(result).length }));
+    } finally { sqlite.close(); }
+  });
+});

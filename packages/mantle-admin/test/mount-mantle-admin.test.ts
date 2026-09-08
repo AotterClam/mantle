@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { linkManifestSet, parseManifestSources } from "@aotter/mantle-spec";
 import { compileRuntimePlan, type RuntimePlan } from "@aotter/mantle-runtime";
-import { mountMantleAdmin, type AdminAuth } from "../src/index.js";
+import { mountMantleAdmin, type AdminAuth, type MantleAdminRuntime } from "../src/index.js";
 
 const parsed = parseManifestSources({ sources: [] });
 if (!parsed.ok) throw new Error("expected empty Admin fixture to parse");
@@ -62,6 +62,50 @@ describe("mountMantleAdmin", () => {
       expect(response.status).toBe(413);
     }
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("gates statistics before storage and validates collection/range", async () => {
+    const plan = compilePlan(`
+apiVersion: cms.mantle.aotter.net/v1
+kind: Schema
+metadata: { name: orders }
+spec:
+  title: Orders
+  lifecycle: operational
+  schema: { type: object, properties: { name: { type: string } } }
+`);
+    const readCreationStatistics = vi.fn(async () => ({ total: 5, buckets: [] }));
+    const runtime = { entries: { readCreationStatistics } } as MantleAdminRuntime;
+    const get = vi.fn(async () => runtime);
+    const app = new Hono();
+    let role: string | null = null;
+    let signedIn = false;
+    mountMantleAdmin(app, { plan, get, assets: { fetch: async () => null }, auth: {
+      ...auth,
+      getSession: async () => signedIn ? { session: { id: "s" }, user: { id: "staff" } } : null,
+      getUserRole: async () => role,
+    } });
+    const path = "/admin/api/collections/orders/statistics";
+    expect((await app.request(path)).status).toBe(401);
+    signedIn = true;
+    expect((await app.request(path)).status).toBe(403);
+    expect(get).not.toHaveBeenCalled();
+    role = "contributor";
+    expect((await app.request(path + "?range=all")).status).toBe(400);
+    expect((await app.request(path + "?range=toString")).status).toBe(400);
+    expect((await app.request("/admin/api/collections/missing/statistics")).status).toBe(404);
+    expect(get).not.toHaveBeenCalled();
+    for (const [range, duration, bucketMs] of [["1h", 3_600_000, 300_000], ["24h", 86_400_000, 3_600_000], ["7d", 604_800_000, 21_600_000], ["20d", 1_728_000_000, 86_400_000]] as const) {
+      const response = await app.request(path + "?range=" + range);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      const data = await response.json();
+      expect(data.total).toBe(5);
+      expect(data.to - data.from).toBe(duration);
+      expect(readCreationStatistics).toHaveBeenLastCalledWith({ collection: "orders", from: data.from, to: data.to, bucketMs });
+    }
+    delete runtime.entries.readCreationStatistics;
+    expect((await app.request(path)).status).toBe(501);
   });
 
   it("mounts the selected SPA asset contract", async () => {

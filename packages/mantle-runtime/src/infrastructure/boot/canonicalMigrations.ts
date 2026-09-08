@@ -342,6 +342,11 @@ export const CANONICAL_MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    id: "0008-entry-creation-statistics",
+    description: "Bound collection creation-time aggregation without loading entry bodies",
+    sql: `CREATE INDEX IF NOT EXISTS entries_by_collection_created ON entries(collection, created_at);`,
+  },
 ];
 
 /** Keep Schema logical tables exact across manifest additions, edits, and removals. */

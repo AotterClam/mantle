@@ -447,6 +447,26 @@ export function mountMantleAdmin<E extends Env>(
 
   guarded("get", "/admin/api/collections", () => Response.json({ collections }));
 
+  guarded("get", "/admin/api/collections/:name/statistics", async (c) => {
+    const collection = collections.find((item) => item.name === c.req.param("name") && !item.parent);
+    if (!collection) return Response.json({ error: "Collection not found" }, { status: 404 });
+    const ranges: Record<string, readonly [number, number]> = {
+      "1h": [3_600_000, 300_000], "24h": [86_400_000, 3_600_000],
+      "7d": [7 * 86_400_000, 6 * 3_600_000], "20d": [20 * 86_400_000, 86_400_000],
+    };
+    const range = c.req.query("range") ?? "7d";
+    if (!Object.hasOwn(ranges, range)) return Response.json({ error: "Invalid statistics range" }, { status: 400 });
+    const [duration, bucketMs] = ranges[range]!;
+    const runtime = await ref.get();
+    if (!runtime.entries.readCreationStatistics) {
+      return Response.json({ error: "Statistics unavailable for this storage adapter" }, { status: 501 });
+    }
+    const to = Date.now();
+    const from = to - duration;
+    const statistics = await runtime.entries.readCreationStatistics({ collection: collection.name, from, to, bucketMs });
+    return Response.json({ ...statistics, from, to, bucketMs }, { headers: { "cache-control": "private, no-store" } });
+  });
+
   roleGuarded("get", "/admin/api/developer-console", "owner", () => Response.json(developerConsole));
 
   guarded("get", "/admin/api/views-manifest", () => Response.json({ views: viewsManifest }));

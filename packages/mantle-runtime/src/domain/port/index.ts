@@ -37,6 +37,8 @@ export type {
 } from "./EntryRepository.js";
 export type {
   EntryReader,
+  CreationStatisticsArgs,
+  CreationStatistics,
   EntryDataScalar,
   ReadEntryBySlugArgs,
   ReadEntryByDataFieldArgs,

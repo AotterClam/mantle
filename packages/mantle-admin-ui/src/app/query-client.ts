@@ -1,7 +1,10 @@
-import { QueryClient } from "@tanstack/react-query";
+import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { ApiError } from "../lib/api";
 
 export const queryClient = new QueryClient({
+  mutationCache: new MutationCache({
+    onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["collection-statistics"] }); },
+  }),
   defaultOptions: {
     queries: {
       retry: (failureCount, error) => {

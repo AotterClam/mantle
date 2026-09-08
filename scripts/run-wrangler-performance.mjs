@@ -110,6 +110,11 @@ try {
     rounds: 10,
     warmup: 2,
   });
+  const statistics = await benchmarkHttpRoutes({
+    targets: [{ name: "home-statistics-10000", url: `${baseUrl}/admin/api/collections/posts/statistics?range=20d` }],
+    rounds: 10, warmup: 2,
+  });
+  const statisticsResponse = await (await checkedFetch(`${baseUrl}/admin/api/collections/posts/statistics?range=20d`)).json();
   const adminDetailSparse = await benchmarkHttpRoutes({
     targets: [{
       name: "admin-detail-related-sparse-10000",
@@ -187,6 +192,9 @@ try {
     crowdedRowsReadBounded: crowdedRows.p95 <= Math.max(100, smallRows.p95 * 4),
     publicApiUsesOneQuery: crowdedQueries.max <= 1,
     pageMissStaysBounded: missQueries.max <= 2 && missRows.p95 <= 10,
+    statisticsUsesOneQuery: metric(statistics, "queryCount").max === 1,
+    statisticsHasAllRows: statisticsResponse.total === 10_000 && statisticsResponse.buckets.reduce((sum, row) => sum + row.count, 0) === 10_000,
+    statisticsReturnsBoundedCounts: JSON.stringify(statisticsResponse).length < 4000,
     adminListUsesOneQuery: adminQueryMax <= 1,
     adminListRowsReadBounded: adminRowsP95 <= 100,
     adminDetailSparseReadsStayBounded:
@@ -209,6 +217,7 @@ try {
       ...crowded.results,
       ...misses.results,
       ...admin.results,
+      ...statistics.results,
       ...adminDetailSparse.results,
       ...adminDetailDense.results,
       ...publicCreate.results,
