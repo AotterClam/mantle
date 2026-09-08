@@ -27,6 +27,23 @@ describe("Better Auth 1.7 MCP smoke", () => {
       }),
     });
     const pending: Promise<unknown>[] = [];
+    const prepare = vi.spyOn(db, "prepare");
+    const catalog = await worker.fetch(new Request(`${ORIGIN}/api/views`), { DB: db }, {
+      waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+    } as unknown as ExecutionContext);
+    expect(catalog.status).toBe(200);
+    await Promise.all(pending);
+    // Better Auth eagerly seeds its resource registry and explicitly defers
+    // a missing-table seed to first access. No content preparation runs here.
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(prepare.mock.calls[0]![0]).toContain('"oauthResource"');
+    prepare.mockClear();
+    expect((await worker.fetch(new Request(`${ORIGIN}/api/views`), { DB: db }, {
+      waitUntil: (promise: Promise<unknown>) => pending.push(promise),
+    } as unknown as ExecutionContext)).status).toBe(200);
+    await Promise.all(pending);
+    expect(prepare).not.toHaveBeenCalled();
+    prepare.mockRestore();
     const response = await worker.fetch(new Request(`${ORIGIN}/.well-known/oauth-authorization-server/api/auth`), {
       DB: db,
     }, { waitUntil: (promise: Promise<unknown>) => pending.push(promise) } as unknown as ExecutionContext);

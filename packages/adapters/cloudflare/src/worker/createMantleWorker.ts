@@ -208,6 +208,20 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     });
 
     const app = new Hono<WorkerHonoEnv<Env>>();
+    // Schema readiness belongs to database consumers, not static dispatch.
+    // Preserve the facade's redacted failure boundary if preparation rejects.
+    app.onError((error) => { throw error; });
+    app.use("*", async (c, next) => {
+      const path = c.req.path;
+      if (hasOwnedPrefix(path, auth.basePath)
+        || hasOwnedPrefix(path, "/oauth")
+        || hasOwnedPrefix(path, "/mcp")
+        || hasOwnedPrefix(path, "/admin/api")
+        || path.startsWith(MANTLE_RESERVED_WELL_KNOWN_PREFIX)) {
+        await getRuntime();
+      }
+      await next();
+    });
     mountRuntimeEndpoints(app, ref);
     if (bindings.adminAssets) mountAdmin(app, ref, bindings.adminAssets);
     mountMantleOAuth(app, { auth, assets: bindings.adminAssets });
@@ -279,7 +293,6 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
         if (worker.auth.ready) ctx.waitUntil(worker.auth.ready);
         const setupIncomplete = await setupIncompleteAuthResponse(request, worker.auth);
         if (setupIncomplete) return setupIncomplete;
-        await worker.getRuntime();
         return worker.fetch(request, env, ctx);
       });
     },

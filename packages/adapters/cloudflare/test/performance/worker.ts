@@ -1,15 +1,14 @@
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import type { Manifest } from "@aotter/mantle-spec";
 import { TemplateRegistry } from "@aotter/mantle-web";
 import {
   D1DatabaseDriver,
-  createMantleRuntimeRef,
+  createMantleWorker,
   mountPublicRoutes,
   type D1QueryMetric,
 } from "../../src/index.js";
 import { compileTestPlan } from "../compileTestPlan.js";
-import { mountTestEndpoints } from "../mountTestEndpoints.js";
-import { StubAssetServer, stubAuth } from "../fakes/runtime-bindings.js";
+import { stubAuth } from "../fakes/runtime-bindings.js";
 
 interface Env {
   readonly DB: D1Database;
@@ -121,7 +120,7 @@ function createState(env: Env) {
     `<article><h1>${entry.data["title"]}</h1><p>${entry.data["body"]}</p></article>`);
   templates.registerListTemplate("posts", ({ entries }) =>
     `<main>${entries.map((entry) => `<h2>${entry.data["title"]}</h2>`).join("")}</main>`);
-  const ref = createMantleRuntimeRef({
+  const worker = createMantleWorker({
     plan: compileTestPlan(manifests),
     templates,
     siteDefaults: {
@@ -130,24 +129,25 @@ function createState(env: Env) {
       origin: "https://example.test",
       locales: ["en"],
     },
-    bindings: {
+    bindings: () => ({
       db: new D1DatabaseDriver(env.DB, (metric) => activeMetrics?.push(metric)),
-      adminAssets: new StubAssetServer(),
-    },
-    auth: staffAuth,
+      adminAssets: { fetch: async () => new Response("<!doctype html><title>Admin fixture</title>", { headers: { "content-type": "text/html" } }) },
+    }),
+    auth: () => staffAuth,
+    extend: () => ({ mount: ({ app, ref }) => {
+      app.get("/health", (c) => c.text("ok"));
+      mountPublicRoutes(app as Hono, ref, {
+        collectionRoutes: [{ collection: "posts", segment: "posts", listRoute: true }],
+        notFoundRenderer: async () => new Response("not found", { status: 404 }),
+      });
+    } }),
   });
-  const app = new Hono();
-  mountTestEndpoints(app, ref);
-  mountPublicRoutes(app, ref, {
-    collectionRoutes: [{ collection: "posts", segment: "posts", listRoute: true }],
-    notFoundRenderer: async () => new Response("not found", { status: 404 }),
-  });
-  return { app, ref };
+  return { worker };
 }
 
 async function seed(env: Env, until: number): Promise<Response> {
   const current = state ??= createState(env);
-  await current.ref.get();
+  await current.worker.getRuntime(env);
   const row = await env.DB
     .prepare("SELECT COUNT(*) AS count FROM entries WHERE collection = 'posts'")
     .first<{ count: number }>();
@@ -211,7 +211,7 @@ export default {
     const metrics: D1QueryMetric[] = [];
     activeMetrics = metrics;
     try {
-      const response = await current.app.fetch(request, env, executionCtx);
+      const response = await current.worker.fetch(request, env, executionCtx);
       const measured = new Response(response.body, response);
       measured.headers.set("x-mantle-query-count", String(metrics.length));
       measured.headers.set(

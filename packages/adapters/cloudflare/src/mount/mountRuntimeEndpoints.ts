@@ -14,6 +14,8 @@ export function mountRuntimeEndpoints<E extends Env>(
 ): void {
   const handle = createMantleRequestHandler({ plan: ref.plan, getRuntime: () => ref.get() });
   const dispatch = async (c: Context): Promise<Response> => {
+    // Credential resolvers and fresh roles may use the same canonical database.
+    await ref.get();
     const waitUntil = readWaitUntil(c);
     const caller = await resolveCaller(c.req.raw, {
       auth: ref.auth,

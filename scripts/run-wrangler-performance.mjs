@@ -46,7 +46,21 @@ worker.stderr.on("data", (chunk) => output.push(String(chunk)));
 
 try {
   await waitUntilReady(`${baseUrl}/__health`, worker);
+  const emptyHealth = await benchmarkHttpRoutes({
+    targets: [{ name: "health-empty-db", url: `${baseUrl}/health` }], rounds: 1, warmup: 0,
+  });
   await seed(100);
+  const readiness = [];
+  for (const [name, path, expectedStatus] of [
+    ["health", "/health", 200], ["catalog", "/api/views", 200],
+    ["admin-shell", "/admin/sign-in", 200], ["mcp-challenge", "/mcp/staff", 401],
+  ]) {
+    await checkedFetch(`${baseUrl}/__reset`);
+    readiness.push(await benchmarkHttpRoutes({
+      targets: [{ name: `${name}-current-db-new-state`, url: `${baseUrl}${path}`, expectedStatus }],
+      rounds: 1, warmup: 0,
+    }));
+  }
   const small = await benchmarkHttpRoutes({
     targets: [{ name: "api-100", url: `${baseUrl}/api/views/recent-posts` }],
     rounds: 10,
@@ -142,6 +156,9 @@ try {
   const publicCreateRows = metric(publicCreate, "rowsRead");
   const publicCreateQueries = metric(publicCreate, "queryCount");
   const gates = {
+    emptyHealthDoesNotPrepare: metric(emptyHealth, "queryCount").max === 0,
+    staticRoutesDoNotPrepare: readiness.slice(0, 3).every((sample) => metric(sample, "queryCount").max === 0),
+    challengePreparesOnlyFingerprint: metric(readiness[3], "queryCount").max <= 1,
     currentDatabaseFirstPageUsesFourQueries: metric(freshStatePage, "queryCount").max <= 4,
     currentDatabaseWarmPageUsesTwoQueries: metric(warmStatePage, "queryCount").max <= 2,
     crowdedRowsReadBounded: crowdedRows.p95 <= Math.max(100, smallRows.p95 * 4),
@@ -161,6 +178,8 @@ try {
     environment: "wrangler-local",
     datasets: [100, 10_000],
     results: [
+      ...emptyHealth.results,
+      ...readiness.flatMap((sample) => sample.results),
       ...small.results,
       ...freshStatePage.results,
       ...warmStatePage.results,
