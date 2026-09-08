@@ -3,7 +3,19 @@ import { execFileSync, spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+if (process.argv[2] === "--channels") {
+  console.log(releaseChannels(process.argv[3]).join(" "));
+  process.exit(0);
+}
+
 if (process.argv[2] === "--self-test") {
+  assert.deepEqual(releaseChannels("0.0.11-alpha.63"), ["alpha", "latest"]);
+  assert.deepEqual(releaseChannels("0.1.0-alpha.17"), ["alpha"]);
+  assert.deepEqual(releaseChannels("0.1.2-alpha.1"), ["alpha"]);
+  assert.deepEqual(releaseChannels("0.1.2-beta.1"), ["beta"]);
+  assert.deepEqual(releaseChannels("0.1.2-rc.1"), ["rc"]);
+  assert.deepEqual(releaseChannels("0.1.2"), ["latest"]);
+  assert.throws(() => releaseChannels("0.1.2-preview.1"), /Unsupported/);
   const ancestor = (left, right) => left === "old" && right === "new";
   assert.equal(decide("same", "same", ancestor), "same");
   assert.equal(decide("new", "old", ancestor), "advance");
@@ -55,4 +67,11 @@ function isAncestor(left, right) {
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
+}
+
+function releaseChannels(version) {
+  const prerelease = version.match(/-(alpha|beta|rc)(?:\.|$)/)?.[1];
+  if (version.includes("-") && !prerelease) throw new Error(`Unsupported prerelease channel: ${version}`);
+  const channel = prerelease ?? "latest";
+  return /^0\.0\.\d+-alpha(?:\.|$)/.test(version) ? [channel, "latest"] : [channel];
 }
