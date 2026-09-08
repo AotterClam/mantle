@@ -208,9 +208,15 @@ export function createMantleWorker<Env extends MantleCloudflareEnv = MantleCloud
     });
 
     const app = new Hono<WorkerHonoEnv<Env>>();
+    // Preserve Hono HTTP responses; redact unexpected failures at the facade.
+    app.onError((error, c) => {
+      if ("getResponse" in error) {
+        const response = error.getResponse();
+        return c.newResponse(response.body, response);
+      }
+      throw error;
+    });
     // Schema readiness belongs to database consumers, not static dispatch.
-    // Preserve the facade's redacted failure boundary if preparation rejects.
-    app.onError((error) => { throw error; });
     app.use("*", async (c, next) => {
       const path = c.req.path;
       if (hasOwnedPrefix(path, auth.basePath)
