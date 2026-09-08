@@ -314,8 +314,8 @@ export interface CreateAuthConfig {
   /** First-user-becomes-owner rule. Without it, the `owner` role must
    *  be assigned manually in D1. */
   readonly bootstrapOwner?: BootstrapOwnerRule;
-  /** Better Auth's built-in rate limit. Defaults off; production
-   *  deployments should set it. */
+  /** Better Auth's always-enabled rate limit. Email methods default to
+   *  10/minute, others to 100/minute; plugin-specific limits still apply. */
   readonly rateLimit?: { readonly window: number; readonly max: number };
   /** Additional Better Auth trusted origins. SDK still injects
    *  provider-required origins such as Apple automatically. */
@@ -820,19 +820,17 @@ function buildAuth(config: CreateAuthConfig) {
     ? buildOAuthProviderOptions(config.oauthProvider)
     : null;
 
-  // Rate limit: Better Auth's per-route limits gate on
-  // `process.env.NODE_ENV === "production"`, which is unset on
-  // Cloudflare Workers — leaving the limits silently off. When any
-  // email-shaped method is wired (free email-send-to-any-address
-  // surface) we ALWAYS turn limits on; adopter can override
-  // window/max via `config.rateLimit`.
+  // Workers may not set NODE_ENV. Explicitly enable the provider's route
+  // limits too (notably anonymous DCR: 5/minute).
+  // ponytail: memory limits are per isolate; use an ingress rate-limit rule
+  // when a deployment needs a distributed abuse quota.
   const hasEmailMethod = !!(emailOtpMethod || magicLinkMethod);
-  const rateLimitDefault = hasEmailMethod
-    ? { window: 60, max: 10, enabled: true as const }
-    : null;
-  const rateLimit = config.rateLimit
-    ? { ...config.rateLimit, enabled: true as const }
-    : rateLimitDefault;
+  const rateLimit = {
+    window: 60,
+    max: hasEmailMethod ? 10 : 100,
+    ...config.rateLimit,
+    enabled: true as const,
+  };
 
   // `trustedOrigins`: per-provider auto-origins (Apple needs
   // `https://appleid.apple.com`) plus adopter-owned first-party
@@ -912,6 +910,8 @@ function buildAuth(config: CreateAuthConfig) {
   // it (Better Auth's default raises a state-mismatch).
   const appleNeedsCrossSite = methodsRequireSameSiteNone(config.methods);
   const advancedConfig = {
+    // Cloudflare overwrites this at ingress. Never trust client-controlled XFF.
+    ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
     ...(appleNeedsCrossSite
       ? {
           // Browsers require `secure: true` whenever `sameSite: "none"`.
@@ -1013,7 +1013,7 @@ function buildAuth(config: CreateAuthConfig) {
     onAPIError: { errorURL: normalizeAuthErrorURL(config.errorURL, config.baseURL) },
     socialProviders,
     user: userConfig,
-    ...(rateLimit ? { rateLimit } : {}),
+    rateLimit,
     trustedOrigins,
     advanced: advancedConfig,
     plugins: sdkPlugins,

@@ -36,6 +36,13 @@ describe("signOut", () => {
 });
 
 describe("sign-in", () => {
+  it("renders no Admin UI in an iframe, including direct static asset URLs", () => {
+    for (const pathname of ["/_mantle/admin/index.html", "/admin", "/admin/sign-in", "/oauth/consent"]) {
+      vi.stubGlobal("window", { self: {}, top: {}, location: { pathname, search: "" } });
+      expect(renderToStaticMarkup(createElement(AdminRouterProvider, null, createElement(AdminApp)))).toBe("");
+    }
+  });
+
   it("lets members disconnect their own apps without granting staff access", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, retryOnMount: false } } });
     await client.fetchQuery({

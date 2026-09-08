@@ -29,8 +29,11 @@ import { DeveloperOverviewView } from "../features/logic/developer-overview-view
 import { LogicView } from "../features/logic/logic-view";
 import { InterfaceDocsView } from "../features/logic/interface-docs-view";
 
-export function AdminApp(): React.ReactElement {
+export function AdminApp(): React.ReactElement | null {
   const location = useAdminLocation();
+
+  // Static asset URLs can bypass the server's frame-ancestors headers.
+  if (typeof window !== "undefined" && window.self !== window.top) return null;
 
   if (location.pathname === "/oauth/consent") return <OAuthConsentView />;
 

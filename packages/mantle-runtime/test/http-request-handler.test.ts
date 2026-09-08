@@ -30,6 +30,17 @@ const request = (path: string, method = "POST") => new Request(`https://site.tes
 });
 
 describe("portable indexed Trigger transport", () => {
+  it("rejects oversized JSON before a Trigger can run", async () => {
+    const options = fixture(["/api/items"]);
+    const handle = createMantleRequestHandler(options);
+    const response = await handle(new Request("https://site.test/api/items", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ padding: "x".repeat(1024 * 1024) }),
+    }));
+    expect(response!.status).toBe(413);
+    expect(await response!.json()).toMatchObject({ diagnostic: { code: "INPUT_VALIDATION_FAILED" } });
+    expect(options.invokeTrigger).not.toHaveBeenCalled();
+  });
   it.each([1, 10, 100, 1000])("performs constant segment lookups among %i literal-prefix routes", async (count) => {
     const options = fixture(Array.from({ length: count }, (_, i) => `/api/r${String(i).padStart(4, "0")}/{id}`));
     const match = paths.compileRouteMatcher(options.plan.httpRoutes);

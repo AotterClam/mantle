@@ -17,6 +17,8 @@ import {
   coerceViewParams,
 } from "../../domain/service/ViewParamCoercer.js";
 
+import { JsonBodyTooLargeError, readJsonBody } from "./readJsonBody.js";
+
 const [PAGE_PARAM, SHOW_PARAM] = VIEW_PARAMS_RESERVED;
 export const MANTLE_VIEW_ROUTE_PREFIX = "/api/views";
 
@@ -80,7 +82,15 @@ async function handleTrigger(
   let body: Record<string, unknown>;
   try {
     body = await readBody(request);
-  } catch {
+  } catch (error) {
+    if (error instanceof JsonBodyTooLargeError) {
+      return diagnosticResponse(runtimeDiagnostic({
+        code: "INPUT_VALIDATION_FAILED",
+        severity: "error",
+        path: `${pathPrefix}#/body`,
+        message: error.message,
+      }), 413);
+    }
     return diagnosticResponse(runtimeDiagnostic({
       code: "INPUT_VALIDATION_FAILED",
       severity: "error",
@@ -144,7 +154,7 @@ async function handleView(
 async function readBody(request: Request): Promise<Record<string, unknown>> {
   if (["GET", "DELETE", "HEAD"].includes(request.method)) return {};
   if (!(request.headers.get("content-type") ?? "").includes("json")) return {};
-  const value: unknown = await request.json();
+  const value = await readJsonBody(request);
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("expected a JSON object");
   }
@@ -159,7 +169,7 @@ function positiveNumber(value: string | null): number | undefined {
 
 function diagnosticResponse(
   diagnostic: Diagnostic,
-  status = HTTP_STATUS_BY_CODE[diagnostic.code] ?? httpStatusFor(diagnostic),
+  status: number = HTTP_STATUS_BY_CODE[diagnostic.code] ?? httpStatusFor(diagnostic),
 ): Response {
   return Response.json(
     { ok: false, diagnostic: redactForWire(diagnostic) },

@@ -43,6 +43,7 @@ import {
   jsonRpcOkRaw,
 } from "./McpResponses.js";
 import packageJson from "../../../package.json" with { type: "json" };
+import { JsonBodyTooLargeError, readJsonBody } from "../http/readJsonBody.js";
 
 export const MCP_PROTOCOL_VERSION = "2025-11-25";
 
@@ -150,8 +151,11 @@ export class McpJsonRpcDispatcher {
 
     let body: { jsonrpc?: string; id?: number | string | null; method?: string; params?: unknown };
     try {
-      body = (await req.json()) as typeof body;
-    } catch {
+      body = (await readJsonBody(req)) as typeof body;
+    } catch (error) {
+      if (error instanceof JsonBodyTooLargeError) {
+        return new Response(error.message, { status: 413 });
+      }
       return jsonRpcError(null, -32700, "parse error");
     }
     if (

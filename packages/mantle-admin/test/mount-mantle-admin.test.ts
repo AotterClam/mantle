@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { linkManifestSet, parseManifestSources } from "@aotter/mantle-spec";
 import { compileRuntimePlan, type RuntimePlan } from "@aotter/mantle-runtime";
 import { mountMantleAdmin, type AdminAuth } from "../src/index.js";
@@ -25,11 +25,54 @@ const auth: AdminAuth = {
 };
 
 describe("mountMantleAdmin", () => {
+  it.each([
+    { origin: "https://evil.test", "sec-fetch-site": "cross-site" },
+    { origin: "https://evil.example.test", "sec-fetch-site": "same-site" },
+    { origin: "https://evil.test" },
+    { "sec-fetch-site": "same-site" },
+  ])("blocks cross-origin session mutations %j", async (headers) => {
+    const inviteUser = vi.fn(async () => ({ kind: "created" as const, id: "invited" }));
+    const app = mounted({
+      getSession: async () => ({ session: { id: "s" }, user: { id: "owner" } }),
+      getUserRole: async () => "owner",
+      inviteUser,
+    });
+    const response = await app.request("https://example.test/admin/api/staff/invitations", {
+      method: "POST", headers: { ...headers, "content-type": "text/plain" },
+      body: JSON.stringify({ email: "attacker@example.test", role: "owner" }),
+    });
+    expect(response.status).toBe(403);
+    expect(inviteUser).not.toHaveBeenCalled();
+    const allowed = await app.request("https://example.test/admin/api/staff/invitations", {
+      method: "POST", headers: { origin: "https://example.test", "sec-fetch-site": "same-origin", "content-type": "application/json" },
+      body: JSON.stringify({ email: "staff@example.test", role: "editor" }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(inviteUser).toHaveBeenCalledOnce();
+  });
+
+  it("bounds Admin and auth bodies before calling the handler", async () => {
+    const handler = vi.fn(async () => new Response("unexpected"));
+    const app = mounted({ handler });
+    for (const path of ["/api/auth/oauth2/register", "/admin/api/staff/invitations"]) {
+      const response = await app.request("https://example.test" + path, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(1024 * 1024) }),
+      });
+      expect(response.status).toBe(413);
+    }
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("mounts the selected SPA asset contract", async () => {
     const app = mounted();
     const response = await app.request("https://example.test/admin/settings");
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("admin shell");
+    expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect((await app.request("https://example.test/admin/dev")).status).toBe(200);
     expect((await app.request("https://example.test/admin/dev/docs")).status).toBe(200);
     expect((await app.request("https://example.test/admin/connected-apps")).status).toBe(200);
@@ -300,7 +343,7 @@ function mounted(overrides: Partial<AdminAuth> = {}, plan: RuntimePlan = compile
   mountMantleAdmin(app, {
     plan,
     auth: { ...auth, ...overrides },
-    assets: { fetch: async () => new Response("admin shell") },
+    assets: { fetch: async () => new Response("admin shell", { headers: { "content-security-policy": "default-src 'self'" } }) },
     get: async () => {
       throw new Error("runtime should stay lazy for shell/auth denial");
     },

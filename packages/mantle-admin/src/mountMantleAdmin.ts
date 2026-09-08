@@ -1,4 +1,6 @@
 import type { Context, Env, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { rejectCrossOriginMutation } from "./rejectCrossOriginMutation.js";
 import {
   DiagnosticError,
   HTTP_STATUS_BY_CODE,
@@ -29,6 +31,7 @@ import {
 } from "@aotter/mantle-spec";
 import {
   ViewParamCoercionError,
+  MAX_JSON_BODY_BYTES,
   coerceViewParams,
   evaluateAuthAll,
   projectCallableCapabilities,
@@ -146,11 +149,23 @@ export function mountMantleAdmin<E extends Env>(
     const asset = await ref.assets.fetch(
       new Request(new URL("/_mantle/admin/index.html", c.req.url)),
     );
-    return asset ?? new Response(
+    if (asset) {
+      const headers = new Headers(asset.headers);
+      // Append a separate policy so an asset's existing CSP remains effective.
+      headers.append("content-security-policy", "frame-ancestors 'none'");
+      headers.set("x-frame-options", "DENY");
+      headers.set("cache-control", "private, no-store");
+      return new Response(asset.body, { status: asset.status, headers });
+    }
+    return new Response(
       "Mantle Admin assets are missing; run `mantle generate` and configure the ASSETS binding.",
       { status: 503, headers: { "cache-control": "private, no-store" } },
     );
   };
+
+  const limitBody = bodyLimit({ maxSize: MAX_JSON_BODY_BYTES });
+  app.use("/admin/api/*", limitBody);
+  app.use(`${authBasePath}/*`, limitBody);
 
   // Public read-only manifest of registered sign-in methods. The admin
   // SPA hits this on sign-in-page mount so it can render per-method
@@ -268,6 +283,8 @@ export function mountMantleAdmin<E extends Env>(
     body: (c: Context, gate: StaffGateOk) => Response | Promise<Response>,
   ): void => {
     app.on(method.toUpperCase(), path, async (c) => {
+      const rejected = rejectCrossOriginMutation(c.req.raw);
+      if (rejected) return rejected;
       const gate = await readStaffGate(c, auth);
       if (gate.kind === "unauth") return adminUnauthenticated(c, path);
       if (gate.kind === "forbidden") return adminNotStaff(c, path, gate.login);

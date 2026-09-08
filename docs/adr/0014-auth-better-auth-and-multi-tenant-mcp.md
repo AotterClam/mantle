@@ -673,6 +673,24 @@ is required. The unshipped watermark migration 0008 is removed; its unused
 table in the phsu development database is harmless and is not queried or
 deleted during deployment.
 
+## 2026-09-08 amendment — request security boundaries
+
+All Admin session mutations use the existing same-origin guard, including
+same-site sibling origins. Admin HTML forbids framing and is private/no-store.
+The SPA also refuses to render in frames, covering direct static-asset URLs
+that bypass the server mount.
+The Admin/auth mounts cap request bodies at 1 MiB using Hono's body limiter;
+HTTP trigger and MCP dispatchers count streamed JSON bytes before parsing and
+return 413 above the same limit. Media bytes continue through direct uploads.
+This intentionally rejects previously accepted larger control-plane payloads.
+
+Cloudflare `createAuth` explicitly enables Better Auth rate limits regardless
+of `NODE_ENV`, including the OAuth provider's anonymous registration limit of
+five requests per minute. Only `CF-Connecting-IP` supplies the client key.
+The upstream memory store limits each isolate; deployments needing a shared
+abuse quota must additionally enforce it at ingress. No D1 migration or new
+runtime platform dependency is introduced.
+
 Workers must retain initialization work through `ExecutionContext.waitUntil`
 even when the initial challenge finishes or its client disconnects. Schema
 boot precedes OAuth handling. The adapter's static AsyncLocalStorage seeding
