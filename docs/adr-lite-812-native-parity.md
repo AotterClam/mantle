@@ -79,6 +79,30 @@ runs and both extra locale runs also passed. Self-review corrected a fixture tha
 accidentally scaled indexes with Schemas, an English-only page assertion in the
 multilingual fixture, and missing D1 metadata incorrectly summarized as zero.
 
+## Remote difference budget (calibrated 2026-09-08)
+
+The first complete off-a block (05:44:20–05:57:16 UTC, SDK 1798e78) contains
+1,385 requests with 100% native CPU coverage, 46 first-for-workload arrivals and
+no unexpected status failures. Public cache returned MISS then HIT; the HIT
+had no invocation record. Warm F2/M CPU medians match at 0 ms health, 2 ms View,
+1 ms Procedure, 2 ms MCP catalog and 3 ms Bearer MCP View. DPoP medians differ
+by 0–1 ms; the largest within-run CPU delta upper interval is 2 ms. One hundred
+requests per layer/diagnostics mode measure roughly +1 ms median CPU for the
+collector itself on both layers. This is native millisecond-resolution telemetry.
+
+Freeze this initial budget before evaluating the on-a/off-b/on-b blocks:
+
+- At least 20 repeat-in-isolate samples per layer, equivalent successful payloads
+  and current authorization checks; expected denial cases are functional gates.
+- Upper 95% bootstrap interval for M minus F2 median platform CPU: at most 2 ms.
+- Upper 95% bootstrap interval for M minus F2 median full-body latency: at most
+  max(15 ms, 5% of the paired F2 median). Compare consistent placement contexts;
+  report changes in ingress/execution placement separately.
+- Exact warm statement/binding budgets and zero unexpected outcomes still apply.
+  Latency/CPU differences are a matched deployment acceptance budget, not an
+  absolute cross-machine CI timer gate. First-for-workload records stay visible;
+  the budget makes no blanket claim about cold setup or all native workloads.
+
 ## Reproduction and remote acceptance
 
 Run from the repository root with built workspace dependencies:
