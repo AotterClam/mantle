@@ -135,6 +135,7 @@ try {
   await measure("dpop-replay", "/mcp", { layer: "F2", token: dpopCredentials.accessToken, proof: replay, json: rpc, status: 401, rounds: 1, warmup: 0 });
   assertions.push("identical View/catalog results; drafts excluded; invalid/missing token, input, DPoP proof/replay, current role, consent and session denials");
 
+  if (process.env.BENCH_SKIP_R2 !== "1") {
   for (const bytes of [1024, 65536, 262144]) {
     await control("r2seed", { bytes });
     for (const variants of [1, 3, 12]) {
@@ -156,6 +157,7 @@ try {
   assert.equal(failed.records[0].record.r2.get.calls, 3);
   await measure("r2-retry", "/r2?variants=12", { rounds: 1, warmup: 0 });
   assertions.push("native R2 HEAD and GET/PUT floors; 1/3/12 variants and three sizes; bounded transfers; failed batch stops and retry succeeds");
+  }
 
   for (const observed of [false, true]) for (const layer of (process.env.BENCH_ORDER === "reverse" ? ["M", "F2"] : ["F2", "M"])) await measure(`instrumentation-${observed}-${layer}`, "/mcp", { layer, token: true, json: call, observed, rounds: 100 });
   if (!remote && process.env.BENCH_QUICK !== "1") {
@@ -169,7 +171,7 @@ try {
   }
   }
   const cacheProbes = remote ? await probeCache() : null;
-  const report = { version: 1, cacheProbes, bundle, environment: remote ? "remote-origin" : "workerd-local", startedAt, endedAt: new Date().toISOString(),
+  const report = { version: 1, skipped: process.env.BENCH_SKIP_R2 === "1" ? ["R2: unavailable in this deployment; use the native workerd R2 matrix"] : [], cacheProbes, bundle, environment: remote ? "remote-origin" : "workerd-local", startedAt, endedAt: new Date().toISOString(),
     versions, scale: { routes: currentBoot.routes, schemas: currentBoot.schemas, views: currentBoot.views, locales: (process.env.BENCH_LOCALES ?? "en").split(",").length }, compatibilityDate: "2026-07-08", rounds, origin, assertions, results,
     notes: ["F0 health is a response floor; R2 F0 is HEAD only. F1 omits authentication. Only F2 vs M MCP/View comparisons claim matched security work.",
       "Procedure native validation errors compare status/code, not complete diagnostic text. Web/Admin are facade coverage, not matched native parity. R2 compares storage commit, not D1 MediaAsset publication.",
