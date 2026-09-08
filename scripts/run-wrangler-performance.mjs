@@ -142,6 +142,16 @@ try {
     rounds: 10,
     warmup: 2,
   });
+  const routeScaling = [];
+  for (const routes of [1, 10, 100, 1000]) {
+    await checkedFetch(`${baseUrl}/__reset?routes=${routes}`);
+    routeScaling.push(await benchmarkHttpRoutes({
+      targets: [{ name: `trigger-last-of-${routes}`, url: `${baseUrl}/api/scaled-${String(routes - 1).padStart(4, "0")}`,
+        init: { method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ postId: "post-0", body: "Route scaling" }) },
+      }], rounds: 20, warmup: 2,
+    }));
+  }
   const smallRows = metric(small, "rowsRead");
   const crowdedRows = metric(crowded, "rowsRead");
   const crowdedQueries = metric(crowded, "queryCount");
@@ -156,6 +166,7 @@ try {
   const publicCreateRows = metric(publicCreate, "rowsRead");
   const publicCreateQueries = metric(publicCreate, "queryCount");
   const gates = {
+    scaledTriggersKeepOneStatement: routeScaling.every((sample) => metric(sample, "queryCount").max === 1),
     emptyHealthDoesNotPrepare: metric(emptyHealth, "queryCount").max === 0,
     staticRoutesDoNotPrepare: readiness.slice(0, 3).every((sample) => metric(sample, "queryCount").max === 0),
     challengePreparesOnlyFingerprint: metric(readiness[3], "queryCount").max <= 1,
@@ -189,6 +200,7 @@ try {
       ...adminDetailSparse.results,
       ...adminDetailDense.results,
       ...publicCreate.results,
+      ...routeScaling.flatMap((sample) => sample.results),
     ],
     gates,
   };

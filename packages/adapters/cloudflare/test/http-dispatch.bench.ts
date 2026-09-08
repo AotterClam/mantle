@@ -186,3 +186,36 @@ describe("warm native HTTP dispatch", () => {
     });
   });
 });
+
+for (const routes of [1, 10, 100, 1000]) {
+  describe(`indexed Trigger dispatch / ${routes} routes`, () => {
+    const plan = compileTestPlan([
+      ...manifests().filter((manifest) => manifest.kind !== "Trigger"),
+      ...Array.from({ length: routes }, (_, index): Manifest => ({
+        apiVersion, kind: "Trigger", metadata: { name: `scaled-${index}` },
+        spec: {
+          source: { kind: "http", method: "POST", path: `/api/scaled-${String(index).padStart(4, "0")}/{siteId}` },
+          target: { procedure: "reserve-site" },
+        },
+      })),
+    ]);
+    const scaled = new Hono();
+    const ref = createMantleRuntimeRef({
+      plan, handlers: { requireAccount: () => ({}), reserveSite: () => ({ reserved: true }) },
+      bindings: { db: new InMemoryDatabase() }, auth: stubAuth,
+      credentialResolver: () => ({ kind: "verified", credential: {
+        credential: "api-key", credentialId: "bench-key", userId: null, scopes: ["sites:write"],
+      } }),
+    });
+    mountTestEndpoints(scaled, ref);
+    const run = async () => {
+      const response = await scaled.request(`/api/scaled-${String(routes - 1).padStart(4, "0")}/site-1`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: '{"operationId":"op-1"}',
+      });
+      if (response.status !== 200) throw new Error(`scaled dispatch failed: ${response.status}`);
+      await response.text();
+    };
+    beforeAll(run);
+    bench("last route", run);
+  });
+}

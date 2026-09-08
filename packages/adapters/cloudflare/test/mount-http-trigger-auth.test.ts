@@ -1,6 +1,6 @@
 import { compileTestPlan } from "./compileTestPlan.js";
 import { Hono } from "hono";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DiagnosticError,
   runtimeDiagnostic,
@@ -193,6 +193,24 @@ describe("mountTestEndpoints: HTTP Trigger ctx plumbing (#299)", () => {
     expect(malformedPath.status).toBe(404);
     expect(inputs).toHaveLength(1);
     expect(resolverCalls).toBe(3);
+  });
+
+  it("preserves portable literal priority when Hono matches an encoded path through a param route", async () => {
+    const manifests = staffGatedManifests();
+    for (const [name, path] of [["literal", "/api/items/literal"], ["dynamic", "/api/items/{id}"]]) {
+      manifests.push({ apiVersion, kind: "Trigger", metadata: { name }, spec: {
+        source: { kind: "http", method: "POST", path }, target: { procedure: "staff-only-op" },
+      } });
+    }
+    const ref = createMantleRuntimeRef({
+      plan: compileTestPlan(manifests), handlers: { staffOnlyOp: () => ({}) },
+      bindings: { db: new InMemoryDatabase() }, auth: authFake({ role: "owner" }),
+    });
+    const invocation = vi.spyOn(await ref.get(), "invokeTrigger");
+    const app = new Hono();
+    mountTestEndpoints(app, ref);
+    expect((await app.request("/api/items/litera%6c", { method: "POST" })).status).toBe(200);
+    expect(invocation).toHaveBeenCalledWith(expect.objectContaining({ trigger: "literal" }));
   });
 
   it("returns 401 UNAUTHENTICATED when no session and Procedure requires auth", async () => {
