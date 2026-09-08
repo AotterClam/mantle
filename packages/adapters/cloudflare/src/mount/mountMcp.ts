@@ -7,6 +7,8 @@ import type { MantleRuntimeRef } from "./bootRuntimeOnce.js";
 import { contextForVerifiedUser } from "./resolveCaller.js";
 import { rejectCrossOriginMutation } from "@aotter/mantle-admin";
 
+import { beginDiagnosticPhase, diagnosticPhase, requestDiagnosticContext } from "../requestDiagnostics.js";
+
 export interface CreateMcpApiHandlerOptions {
   readonly ref: MantleRuntimeRef;
   readonly surface: "staff" | "public";
@@ -48,14 +50,14 @@ export function createMcpApiHandler<Env = Record<string, unknown>>(
     async fetch(request, env, ctx) {
       const rejected = rejectCrossOriginMutation(request);
       if (rejected) return rejected;
-      const verified = await ref.auth.verifyOAuthAccessToken(request, {
+      const verified = await diagnosticPhase("oauth", () => ref.auth.verifyOAuthAccessToken(request, {
         audience: resource,
         scopes: requiredScopes,
-      });
+      }));
       if (!verified.ok) return oauthDenied(resource, requiredScopes, verified);
       const grantedScopes = verified.scopes;
       const waitUntil = typeof ctx.waitUntil === "function" ? ctx.waitUntil.bind(ctx) : undefined;
-      const handlerContext = await contextForVerifiedUser(
+      const handlerContext = await diagnosticPhase("role", () => contextForVerifiedUser(
         verified.userId,
         {
           credential: "oauth",
@@ -65,7 +67,7 @@ export function createMcpApiHandler<Env = Record<string, unknown>>(
         },
         ref.auth,
         { env, ...(waitUntil ? { waitUntil } : {}) },
-      );
+      ));
       if (surface === "staff" && !handlerContext.staff) {
         return oauthDenied(resource, requiredScopes, {
           status: 403,
@@ -79,68 +81,76 @@ export function createMcpApiHandler<Env = Record<string, unknown>>(
       // the tools in tools/list at all. Read this before consulting the
       // dispatcher cache so operator edits to site_config update the
       // MCP catalog without a redeploy/runtime reset.
-      const site = ref.mcpCatalogSiteConfig
-        ? await ref.mcpCatalogSiteConfig.loadCatalogSite(runtime)
-        : await runtime.siteConfig.load();
-      const mediaPurposes = runtime.media ? site.media.purposes : [];
-      // Serialise the whole policy set as the cache key — name + required
-      // mimes + per-mime maxBytes all participate. Operator edits to any
-      // of these rebuild the dispatcher when the discovery snapshot changes.
-      // Upload authorization still reads the canonical policy on every call.
-      const publicUrl = URL.canParse(site.origin) ? site.origin : new URL(request.url).origin;
-      const iconBase = `${publicUrl}/`;
-      const serverInfo = {
-        name: `aotter.mantle.${surface}`,
-        title: site.brand,
-        description: site.description || undefined,
-        websiteUrl: publicUrl,
-        icons: site.icons.filter((icon) => URL.canParse(icon.src, iconBase)).map((icon) => ({
-          ...icon,
-          src: new URL(icon.src, iconBase).href,
-        })),
-      };
-      const configKey = JSON.stringify({ mediaPurposes, serverInfo });
-      let cached = dispatcherCache.get(runtime);
-      if (!cached || cached.configKey !== configKey) {
-        const mediaEnabled = runtime.media !== null && mediaPurposes.length > 0;
-        const dispatcher = new McpJsonRpcDispatcher(
-          {
-            listEntries: runtime.listEntries,
-            getEntry: runtime.getEntry,
-            createDraft: runtime.createDraft,
-            updateDraft: runtime.updateDraft,
-            requestPublish: runtime.requestPublish,
-            unpublish: runtime.unpublish,
-            archive: runtime.archive,
-            deleteEntry: runtime.deleteEntry,
-            executeView: {
-              execute: (request) => runtime.executeView({
-                ...request,
-                view: request.view.metadata.name,
-              }),
+      const site = await diagnosticPhase("catalog", async () => {
+        if (ref.mcpCatalogSiteConfig) return ref.mcpCatalogSiteConfig.loadCatalogSite(runtime);
+        const record = requestDiagnosticContext.getStore();
+        if (record) record.catalog.source = "binding-absent";
+        return runtime.siteConfig.load();
+      });
+      const stopBuild = beginDiagnosticPhase("dispatcherBuild");
+      let selectedDispatcher: McpJsonRpcDispatcher;
+      try {
+        const mediaPurposes = runtime.media ? site.media.purposes : [];
+        // Serialise the whole policy set as the cache key — name + required
+        // mimes + per-mime maxBytes all participate. Operator edits to any
+        // of these rebuild the dispatcher when the discovery snapshot changes.
+        // Upload authorization still reads the canonical policy on every call.
+        const publicUrl = URL.canParse(site.origin) ? site.origin : new URL(request.url).origin;
+        const iconBase = `${publicUrl}/`;
+        const serverInfo = {
+          name: `aotter.mantle.${surface}`,
+          title: site.brand,
+          description: site.description || undefined,
+          websiteUrl: publicUrl,
+          icons: site.icons.filter((icon) => URL.canParse(icon.src, iconBase)).map((icon) => ({
+            ...icon,
+            src: new URL(icon.src, iconBase).href,
+          })),
+        };
+        const configKey = JSON.stringify({ mediaPurposes, serverInfo });
+        let cached = dispatcherCache.get(runtime);
+        if (!cached || cached.configKey !== configKey) {
+          const mediaEnabled = runtime.media !== null && mediaPurposes.length > 0;
+          const dispatcher = new McpJsonRpcDispatcher(
+            {
+              listEntries: runtime.listEntries,
+              getEntry: runtime.getEntry,
+              createDraft: runtime.createDraft,
+              updateDraft: runtime.updateDraft,
+              requestPublish: runtime.requestPublish,
+              unpublish: runtime.unpublish,
+              archive: runtime.archive,
+              deleteEntry: runtime.deleteEntry,
+              executeView: {
+                execute: (request) => runtime.executeView({
+                  ...request,
+                  view: request.view.metadata.name,
+                }),
+              },
+              invokeTrigger: {
+                execute: (request) => runtime.invokeTrigger(request),
+              },
+              media: mediaEnabled && runtime.media
+                ? {
+                    createUpload: runtime.media.createUpload,
+                    commitUpload: runtime.media.commitUpload,
+                    purposes: mediaPurposes,
+                  }
+                : undefined,
             },
-            invokeTrigger: {
-              execute: (request) => runtime.invokeTrigger(request),
+            [...runtime.schemas.values()],
+            {
+              surface,
+              capabilities: projectCallableCapabilities(ref.plan, { surface }),
+              serverInfo,
             },
-            media: mediaEnabled && runtime.media
-              ? {
-                  createUpload: runtime.media.createUpload,
-                  commitUpload: runtime.media.commitUpload,
-                  purposes: mediaPurposes,
-                }
-              : undefined,
-          },
-          [...runtime.schemas.values()],
-          {
-            surface,
-            capabilities: projectCallableCapabilities(ref.plan, { surface }),
-            serverInfo,
-          },
-        );
-        cached = { configKey, dispatcher };
-        dispatcherCache.set(runtime, cached);
-      }
-      return cached.dispatcher.dispatch(request, handlerContext);
+          );
+          cached = { configKey, dispatcher };
+          dispatcherCache.set(runtime, cached);
+        }
+        selectedDispatcher = cached.dispatcher;
+      } finally { stopBuild(); }
+      return diagnosticPhase("dispatch", () => selectedDispatcher.dispatch(request, handlerContext));
     },
   };
 }
