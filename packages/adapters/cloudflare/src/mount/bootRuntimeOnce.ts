@@ -15,6 +15,8 @@ import {
   type McpCatalogSiteConfigReader,
 } from "../bindings/KvSiteConfigRepository.js";
 
+import { diagnosticPhase } from "../requestDiagnostics.js";
+
 /**
  * Per-isolate runtime singleton. The cached promise MUST reset on
  * rejection (PR #29 carry-forward) — otherwise a transient D1 error
@@ -66,33 +68,35 @@ export function createMantleRuntimeRef(config: MantleCloudflareConfig): MantleRu
       });
     },
     get(): Promise<CloudflareMantleRuntime> {
-      if (booted) return booted;
-      booted = bootWithD1Retry(async () => {
-        const runtime = await bootMantleRuntime({
-          plan: config.plan,
-          storage,
-          handlers: config.handlers,
-          deployment: {
-            reservedHttpPathPrefixes: config.reservedHttpPathPrefixes,
-          },
-          ports: {
-            deferredHookDispatcher: config.bindings.deferredHookDispatcher,
-            mediaStorage: config.bindings.mediaStorage,
-            mediaAllowSvg: config.mediaAllowSvg,
-            onPublishingContentChange: config.onPublicChange,
-          },
-        });
-        if (!runtime.siteConfig || !runtime.updateSiteSettings) {
-          throw new Error("Cloudflare SQLite storage did not prepare site configuration.");
-        }
-        return runtime as CloudflareMantleRuntime;
-      })
-        .catch((err) => {
-          booted = null;
-          console.error("[mantle] runtime boot failed", errorDetails(err));
-          throw err;
-        });
-      return booted;
+      return diagnosticPhase("runtime", () => {
+        if (booted) return booted;
+        booted = bootWithD1Retry(async () => {
+          const runtime = await bootMantleRuntime({
+            plan: config.plan,
+            storage,
+            handlers: config.handlers,
+            deployment: {
+              reservedHttpPathPrefixes: config.reservedHttpPathPrefixes,
+            },
+            ports: {
+              deferredHookDispatcher: config.bindings.deferredHookDispatcher,
+              mediaStorage: config.bindings.mediaStorage,
+              mediaAllowSvg: config.mediaAllowSvg,
+              onPublishingContentChange: config.onPublicChange,
+            },
+          });
+          if (!runtime.siteConfig || !runtime.updateSiteSettings) {
+            throw new Error("Cloudflare SQLite storage did not prepare site configuration.");
+          }
+          return runtime as CloudflareMantleRuntime;
+        })
+          .catch((err) => {
+            booted = null;
+            console.error("[mantle] runtime boot failed", errorDetails(err));
+            throw err;
+          });
+        return booted;
+      });
     },
   };
 }

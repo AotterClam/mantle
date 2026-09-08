@@ -10,6 +10,7 @@ import type {
   UpdateEditableSiteConfigArgs,
 } from "@aotter/mantle-runtime";
 import { z } from "zod";
+import { requestDiagnosticContext, type CatalogSource } from "../requestDiagnostics.js";
 
 const SNAPSHOT_VERSION = 1;
 const MAX_SNAPSHOT_AGE_MS = 3_600_000;
@@ -71,6 +72,7 @@ const snapshotSchema = z.strictObject({
 
 interface InFlightCatalogLoad {
   readonly generation: number;
+  readonly observation: { source: CatalogSource };
   readonly promise: Promise<McpCatalogSiteConfig>;
 }
 
@@ -139,30 +141,45 @@ export class KvSiteConfigRepository
 
   loadCatalogSite(runtime: object): Promise<McpCatalogSiteConfig> {
     const generation = this.generation;
-    const existing = this.inFlight.get(runtime);
-    if (existing?.generation === generation) return existing.promise;
-    const pending = this.readCatalogSite(generation).finally(() => {
-      if (this.inFlight.get(runtime)?.promise === pending) this.inFlight.delete(runtime);
+    let flight = this.inFlight.get(runtime);
+    const record = requestDiagnosticContext.getStore();
+    const sharedWait = flight?.generation === generation;
+    const started = record && sharedWait ? performance.now() : null;
+    if (!sharedWait) {
+      const observation: { source: CatalogSource } = { source: "not-reached" };
+      const pending = this.readCatalogSite(generation, observation).finally(() => {
+        if (this.inFlight.get(runtime)?.promise === pending) this.inFlight.delete(runtime);
+      });
+      flight = { generation, observation, promise: pending };
+      this.inFlight.set(runtime, flight);
+    }
+    const selected = flight!;
+    if (!record) return selected.promise;
+    return selected.promise.finally(() => {
+      record.catalog.source = selected.observation.source;
+      record.catalog.sharedWait ||= sharedWait;
+      if (started !== null) record.catalog.waitMs = (record.catalog.waitMs ?? 0) + performance.now() - started;
     });
-    this.inFlight.set(runtime, { generation, promise: pending });
-    return pending;
   }
 
-  private async readCatalogSite(generation: number): Promise<McpCatalogSiteConfig> {
+  private async readCatalogSite(generation: number, observation: { source: CatalogSource }): Promise<McpCatalogSiteConfig> {
     let raw: string | null = null;
+    let kvFailed = false;
     try {
       raw = await this.binding.namespace.get(this.key, "text");
     } catch (error) {
+      kvFailed = true;
       this.diagnostic("get-failed", error);
     }
     if (raw !== null) {
       const snapshot = await parseSnapshot(raw, this.binding.scope, Date.now());
       if (snapshot && generation === this.generation) {
         this.lastKnownSnapshot = snapshot;
+        observation.source = "kv-hit";
         return snapshot.site;
       }
     }
-
+    observation.source = kvFailed ? "d1-kv-error" : raw === null ? "d1-miss" : "d1-repair";
     return this.repairCatalogSite();
   }
 
@@ -178,6 +195,8 @@ export class KvSiteConfigRepository
   }
 
   private async publishAfterCommittedWrite(reason: "seed" | "update"): Promise<void> {
+    const record = requestDiagnosticContext.getStore();
+    if (reason === "seed" && record) record.catalog.bootPublications++;
     try {
       const snapshot = await this.loadCanonicalSnapshot();
       await this.putSnapshot(snapshot);

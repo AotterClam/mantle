@@ -167,3 +167,48 @@ The workerd smoke also measures public list, llms and sitemap. The first two
 use two warm statements (settings + page) and bounded D1 work. Sitemap index
 queries and rows-read scale with the number of metadata parts; this explicit
 cost preserves complete discovery instead of silently dropping URLs.
+
+### Request diagnostics (version 1, test/performance only)
+
+Import `runWithRequestDiagnostics`, `instrumentD1`, `instrumentKv` and
+`instrumentR2` from `@aotter/mantle-cloudflare/testing`. Wrap native bindings once
+before handing the same D1 object to Auth and Runtime. Open the request context
+outside the complete facade fetch, and pass binding-presence flags matching the
+instrumented fixture. The observer receives one response-time record; it never
+receives request headers, tokens, proofs, user IDs, SQL, parameters, tool arguments,
+object keys or response content. Sync/async observer failure cannot change the
+original response or exception. The library emits no diagnostic headers or logs.
+
+Records distinguish HTTP outcome from JSON-RPC result/error/tool-error. They
+include actual in-isolate arrivals, inclusive OAuth/DPoP, role, runtime, catalog,
+dispatcher construction and dispatch wall spans. Unreached phases are null.
+Shared KV loads charge native I/O once to the initiating request; waiters record
+wait duration and the same hit/miss/repair/error source. Boot publication has a
+separate counter. The original rejected shared load remains retryable.
+
+D1 statements and binding calls are separate: a batch is one call and N attempted
+statements. Failed attempts count. `exec` uses the provider's count; unavailable
+counts stay in `unknownStatementCalls`, never a semicolon parser. `first(column)`
+and `raw` preserve native behavior and do not silently execute `all` to manufacture
+metadata. Their absent metadata is null. Rows/duration are sums of available
+metadata, and `metadataStatements` identifies coverage; incomplete coverage is
+not a full-workload total. Serialized binding results are measured bytes, not a
+claim about bytes on the provider's wire. Existing D1DatabaseDriver observers can
+request metadata for first-row reads when a fixture explicitly chooses that mode.
+
+KV bytes identify UTF-8, buffer or reserialized JSON sources. R2 payload bytes
+remain unknown for an unconsumed/partly consumed GET. A successful PUT of that exact
+native GET stream confirms the transferred body size on both operations. Streams
+are never wrapped or buffered for diagnostics, preserving R2's native known-length
+contract. `byteSamples` distinguishes known payload samples from the operation
+count. Metadata/list response serialization is labeled separately from object
+payload. R2 coverage is head/get/put/delete/list, not multipart-upload instrumentation.
+
+Snapshots freeze at response creation; outstanding/deferred operations remain
+visible through `inFlight` and metadata coverage and cannot rewrite a published
+record. `totalMs` excludes the subsequent test-only JSON-RPC response inspection,
+delivery and deferred work. CPU, TTFB, full-body duration and heap must be measured
+separately. Worker wall clocks advance on I/O and are not a CPU timer; use the
+[official CPU profiler](https://developers.cloudflare.com/workers/observability/dev-tools/cpu-usage/).
+Measure diagnostics off/on overhead with the same workload before interpreting
+small latency differences.
