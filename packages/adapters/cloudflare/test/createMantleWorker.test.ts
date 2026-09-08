@@ -2,6 +2,8 @@ import { compileTestPlan } from "./compileTestPlan.js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { basicAuth } from "hono/basic-auth";
+import { HTTPException } from "hono/http-exception";
 import type {
   HandlerFn,
   MediaStorage,
@@ -343,6 +345,44 @@ describe("createMantleWorker", () => {
     expect(credentialed.headers.get("cache-control")).toBe("private, no-store");
   });
 
+  it("preserves extension HTTP errors and middleware headers", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const worker = createMantleWorker<TestEnv>({
+        plan: compileTestPlan([]),
+        auth: () => stubAuth,
+        bindings: testBindings,
+        extend: () => ({
+          mount: ({ app }) => {
+            app.use("/private", async (c, next) => {
+              c.header("x-request-id", "test-request");
+              await next();
+            });
+            app.get("/private", basicAuth({ username: "test", password: "test" }), (c) => c.text("ok"));
+            app.get("/limited", () => {
+              throw new HTTPException(429, {
+                res: new Response("Try later", { status: 429, headers: { "retry-after": "60" } }),
+              });
+            });
+          },
+        }),
+      });
+
+      const challenge = await fetchWorker(worker, "/private", testEnv());
+      expect(challenge.status).toBe(401);
+      expect(challenge.headers.get("www-authenticate")).toContain("Basic");
+      expect(challenge.headers.get("x-request-id")).toBe("test-request");
+      expect(challenge.headers.get("cache-control")).toBe("private, no-store");
+      const limited = await fetchWorker(worker, "/limited", testEnv());
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBe("60");
+      await expect(limited.text()).resolves.toBe("Try later");
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it("exposes the conventional binding stack before an override", async () => {
     const mediaStorage = {} as MediaStorage;
     const worker = createMantleWorker<TestEnv>({
@@ -469,7 +509,10 @@ describe("createMantleWorker", () => {
       }),
     });
 
-    expect((await fetchWorker(worker, "/probe", testEnv())).status).toBe(500);
+    const failed = await fetchWorker(worker, "/probe", testEnv());
+    expect(failed.status).toBe(500);
+    expect(failed.headers.get("cache-control")).toBe("private, no-store");
+    await expect(failed.json()).resolves.toEqual({ ok: false, error: "internal_error" });
     expect((await fetchWorker(worker, "/probe", testEnv())).status).toBe(200);
     expect(db.migrationAttempts).toBeGreaterThanOrEqual(2);
     error.mockRestore();
