@@ -20,7 +20,7 @@ means a prefix sum inside the selected range, starting from zero.
 Ranges are 1h/5m, 24h/1h, 7d/6h and 20d/1d. Every interval is half-open; the last
 ends at the observation time. CSV uses ISO UTC bounds while chart labels use the
 browser's timezone. SVG steps preserve exact bucket extents without interpolation.
-The top-right download exports the current card's mode, current total and series;
+The toolbar download exports the current card's mode, current total and series;
 CSV cells are quoted and formula-shaped headers are neutralized.
 
 ## Aggregation and freshness

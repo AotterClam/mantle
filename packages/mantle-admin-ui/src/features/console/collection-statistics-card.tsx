@@ -31,27 +31,26 @@ export function CollectionStatisticsCard({ collection, canonical }: {
     queryKey: ["collection-statistics", collection.name, preferences.range],
     queryFn: () => api.get<CollectionStatistics>(`/collections/${encodeURIComponent(collection.name)}/statistics?range=${preferences.range}`),
     staleTime: 0,
-    refetchOnMount: "always",
     refetchOnWindowFocus: true,
     refetchInterval: 60_000,
   });
   const title = resolveLocalizedText(collection.title, language, canonical) ?? fieldLabel(collection.name);
   const number = new Intl.NumberFormat(language);
-  const data = query.data;
+  const data = query.isError ? undefined : query.data;
   const series = data ? statisticsSeries(data, collection.filter?.values, preferences.mode === "cumulative") : [];
   const { paths, max } = stackedAreas(series);
   const chartId = React.useId();
   const color = (index: number) => `color-mix(in oklch, var(--chart-${index % 5 + 1}) 75%, var(--foreground))`;
-  const date = (value: number) => new Intl.DateTimeFormat(language, preferences.range === "1h"
+  const date = new Intl.DateTimeFormat(language, preferences.range === "1h"
     ? { hour: "2-digit", minute: "2-digit" }
-    : { month: "short", day: "numeric", ...((preferences.range === "7d" || preferences.range === "24h") ? { hour: "2-digit" } as const : {}) }).format(value);
+    : { month: "short", day: "numeric", ...((preferences.range === "7d" || preferences.range === "24h") ? { hour: "2-digit" } as const : {}) }).format;
   const seriesLabel = (name: string | null) => name === null
     ? t(language, collection.filter ? "console.stats.other" : "console.stats.new") : fieldLabel(name);
   return (
     <SectionCard className="min-w-0 gap-3 p-4">
       <h3 className="flex items-baseline justify-between gap-3 text-base font-semibold">
         <a href={`/admin/c/${encodeURIComponent(collection.name)}`} className="min-w-0 rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{title}</a>
-        {data && !query.isError && <span className="shrink-0 tabular-nums" aria-label={`${t(language, "console.stats.total")}: ${number.format(data.total)}`} title={t(language, "console.stats.total")}>{number.format(data.total)}</span>}
+        {data && <span className="shrink-0 tabular-nums" aria-label={`${t(language, "console.stats.total")}: ${number.format(data.total)}`} title={t(language, "console.stats.total")}>{number.format(data.total)}</span>}
       </h3>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={preferences.range} onValueChange={(range) => updatePreferences({ ...preferences, range: range as StatisticsPreferences["range"] })}>
@@ -67,7 +66,7 @@ export function CollectionStatisticsCard({ collection, canonical }: {
             {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode} aria-label={t(language, `console.stats.${mode}`)} title={t(language, `console.stats.${mode}`)}
               onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.short.${mode}`)}</Button>)}
           </div>
-          {data && !query.isError ? <Button asChild variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground">
+          {data ? <Button asChild variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground">
             <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(statisticsCsv(data, series, preferences.mode))}`}
               download={`${collection.name}-${preferences.range}-${preferences.mode}.csv`}
               aria-label={`${title} · ${t(language, "console.stats.download")}`} title={t(language, "console.stats.download")}>
@@ -82,7 +81,7 @@ export function CollectionStatisticsCard({ collection, canonical }: {
           : <ErrorBox error={query.error} />
       ) : data ? <>
         <svg viewBox="0 0 384 140" className="w-full text-muted-foreground" role="img" aria-labelledby={chartId}>
-          <title id={chartId}>{title} · {t(language, preferences.mode === "cumulative" ? "console.stats.cumulative" : "console.stats.interval")} · {number.format(max === 1 && !series.some((row) => row.intervalTotal) ? 0 : max)}</title>
+          <title id={chartId}>{title} · {t(language, `console.stats.${preferences.mode}`)} · {number.format(max)}</title>
           {[16, 64, 112].map((y) => <line key={y} x1="36" x2="372" y1={y} y2={y} stroke="currentColor" strokeOpacity="0.15" strokeDasharray={y === 112 ? undefined : "3 4"} />)}
           <text x="30" y="20" textAnchor="end" fill="currentColor" fontSize="10">{new Intl.NumberFormat(language, { notation: "compact" }).format(max)}</text>
           <text x="30" y="116" textAnchor="end" fill="currentColor" fontSize="10">0</text>
@@ -93,7 +92,6 @@ export function CollectionStatisticsCard({ collection, canonical }: {
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {series.map((row, i) => <span key={row.name ?? "other"} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: color(i) }} />{seriesLabel(row.name)} <span className="tabular-nums">{number.format(row.intervalTotal)}</span></span>)}
         </div>
-
       </> : null}
     </SectionCard>
   );

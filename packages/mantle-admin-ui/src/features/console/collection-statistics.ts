@@ -39,9 +39,9 @@ export function statisticsSeries(data: CollectionStatistics, values: string[] | 
 export function stackedAreas(series: ReturnType<typeof statisticsSeries>) {
   const size = series[0]?.counts.length ?? 0;
   const baseline = Array<number>(size).fill(0);
-  const max = Math.max(1, ...baseline.map((_, i) => series.reduce((sum, row) => sum + row.counts[i]!, 0)));
+  const max = Math.max(0, ...baseline.map((_, i) => series.reduce((sum, row) => sum + row.counts[i]!, 0)));
   const x = (i: number) => 36 + i * 336 / Math.max(1, size);
-  const y = (v: number) => 112 - v * 96 / max;
+  const y = (v: number) => 112 - v * 96 / Math.max(1, max);
   const paths = series.map((row) => {
     const lower = baseline.flatMap((v, i) => [`${x(i)},${y(v)}`, `${x(i + 1)},${y(v)}`]);
     const upper = row.counts.flatMap((v, i) => {

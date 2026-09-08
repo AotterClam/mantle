@@ -42,6 +42,9 @@ describe("home statistics preferences and chart values", () => {
     expect(stackedAreas(cumulative).max).toBe(10);
     expect(stackedAreas(cumulative).paths.every((path) => !/NaN|Infinity/.test(path))).toBe(true);
     expect(statisticsSeries({ ...data, buckets: [] }, undefined, true)[0]!.counts).toEqual([0, 0, 0]);
+    const empty = stackedAreas(statisticsSeries({ ...data, buckets: [] }, undefined, false));
+    expect(empty.max).toBe(0);
+    expect(empty.paths.every((path) => !/NaN|Infinity/.test(path))).toBe(true);
     expect(normal[0]!.counts).toEqual([2, 0, 3]);
   });
 });
