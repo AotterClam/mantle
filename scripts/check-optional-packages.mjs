@@ -71,6 +71,11 @@ try {
   }, `
     const spec = await import("@aotter/mantle-spec");
     const core = await import("@aotter/mantle-runtime");
+    const testing = await import("@aotter/mantle-runtime/testing/storage");
+    if (typeof testing.runStorageConformance !== "function" ||
+        "runStorageConformance" in core) {
+      throw new Error("storage conformance must be available only through its testing subpath");
+    }
     const parsed = spec.parseManifestSources({ sources: [] });
     if (!parsed.ok) throw new Error("empty source set did not parse");
     const linked = spec.linkManifestSet(parsed.value);

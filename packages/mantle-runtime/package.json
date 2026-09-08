@@ -26,6 +26,10 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
+    },
+    "./testing/storage": {
+      "types": "./dist/testing-storage.d.ts",
+      "import": "./dist/testing-storage.js"
     }
   },
   "files": [

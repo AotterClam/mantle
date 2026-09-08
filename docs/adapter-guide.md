@@ -204,6 +204,10 @@ storage preparation and binding do not accept or require a static asset port.
 
 ## Implementation checklist
 
+- [ ] Run `runStorageConformance` from `@aotter/mantle-runtime/testing/storage`
+      against a disposable prepared-storage factory. See the
+      [Runtime conformance guide](../packages/mantle-runtime/README.md#storage-adapter-conformance)
+      for coverage, cleanup, locale setup, and remaining adapter-specific tests.
 - [ ] Implement `MantleStorageAdapter` returning existing semantic ports, or reuse `SqliteMantleStorageAdapter` with an already-owned handle.
 - [ ] Call `bootMantleRuntime()` once per semantic revision, or explicitly prepare before binding.
 - [ ] Mount HTTP Trigger and View REST surfaces.
