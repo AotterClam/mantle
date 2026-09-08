@@ -1856,19 +1856,13 @@ async function assertActiveMcpGrant(
   ) {
     throw new Error("MCP token is not bound to a user session.");
   }
-  const session = await database
-    .prepare(
-      "SELECT id FROM session WHERE id = ? AND userId = ? AND expiresAt > ? LIMIT 1",
-    )
-    .bind(sessionId, userId, new Date().toISOString())
-    .first<{ id: string }>();
-  if (!session) throw new Error("MCP token session is no longer active.");
-
   const result = await database
     .prepare(
-      "SELECT resources, scopes FROM oauthConsent WHERE id = ? AND userId = ? AND clientId = ?",
+      "SELECT c.resources, c.scopes FROM oauthConsent AS c " +
+        "JOIN session AS s ON s.id = ? AND s.userId = c.userId AND s.expiresAt > ? " +
+        "WHERE c.id = ? AND c.userId = ? AND c.clientId = ?",
     )
-    .bind(consentId, userId, clientId)
+    .bind(sessionId, new Date().toISOString(), consentId, userId, clientId)
     .first<{ resources: string | null; scopes: string }>();
   const tokenScopes = scopesFromClaim(claims["scope"]);
   const resources = parseStoredStringArray(result?.resources);

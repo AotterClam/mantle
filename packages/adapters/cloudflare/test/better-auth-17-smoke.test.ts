@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CANONICAL_MIGRATIONS } from "@aotter/mantle-runtime";
 import { createAuth } from "../src/auth/createAuth.js";
+import { contextForVerifiedUser } from "../src/mount/resolveCaller.js";
 import { sqliteD1 } from "./fakes/sqlite-d1.js";
 import { createMantleWorker } from "../src/worker/createMantleWorker.js";
 import { compileTestPlan } from "./compileTestPlan.js";
@@ -218,6 +219,56 @@ describe("Better Auth 1.7 MCP smoke", () => {
     });
     if (!verification.ok) throw new Error("expected a verified MCP access token");
 
+    // Warm JWKS: exactly one native grant statement, then a fresh role read.
+    const queries = vi.spyOn(db, "prepare");
+    expect(await auth.verifyOAuthAccessToken(accessToken, { audience: RESOURCE, scopes: ["mcp"] }))
+      .toMatchObject({ ok: true });
+    expect(queries).toHaveBeenCalledTimes(1);
+    const grantSql = queries.mock.calls[0]![0];
+    const claims = JSON.parse(Buffer.from(accessToken.split(".")[1]!, "base64url").toString());
+    const queryPlan = sqlite.prepare(`EXPLAIN QUERY PLAN ${grantSql}`).all(
+      claims.sid, new Date().toISOString(), claims.mantle_consent_id, claims.sub, claims.azp,
+    ).map((row) => String(row.detail));
+    expect(queryPlan).toHaveLength(2);
+    expect(queryPlan.every((detail) => /SEARCH .+ USING INDEX sqlite_autoindex_/.test(detail))).toBe(true);
+    const caller = () => contextForVerifiedUser(verification.userId, {
+      credential: "oauth", credentialId: null, clientId: CLIENT_ID, scopes: verification.scopes,
+    }, auth, { env: {} });
+    sqlite.prepare("UPDATE user SET role = 'owner' WHERE id = ?").run(verification.userId);
+    expect((await caller()).staff).not.toBeNull();
+    expect(queries).toHaveBeenCalledTimes(2);
+    sqlite.prepare("UPDATE user SET role = 'user' WHERE id = ?").run(verification.userId);
+    expect((await caller()).staff).toBeNull();
+    expect(queries).toHaveBeenCalledTimes(3);
+
+    // JWT signature stays valid: each authoritative predicate must revoke it now.
+    // Defer FK checks while temporarily changing identities, then restore before commit.
+    sqlite.exec("SAVEPOINT grant_predicates; PRAGMA defer_foreign_keys = ON;");
+    for (const [table, id, field, invalid] of [
+      ["session", claims.sid, "id", "another-session"],
+      ["session", claims.sid, "userId", "another-user"],
+      ["session", claims.sid, "expiresAt", new Date(0).toISOString()],
+      ["oauthConsent", claims.mantle_consent_id, "id", "another-consent"],
+      ["oauthConsent", claims.mantle_consent_id, "userId", "another-user"],
+      ["oauthConsent", claims.mantle_consent_id, "clientId", "another-client"],
+      ["oauthConsent", claims.mantle_consent_id, "resources", '["https://other.test/mcp"]'],
+      ["oauthConsent", claims.mantle_consent_id, "resources", "invalid-json"],
+      ["oauthConsent", claims.mantle_consent_id, "scopes", '["mcp"]'],
+      ["oauthConsent", claims.mantle_consent_id, "scopes", '["mcp",42]'],
+    ] as const) {
+      const original = sqlite.prepare(`SELECT ${field} AS value FROM ${table} WHERE id = ?`).get(id)!.value;
+      sqlite.prepare(`UPDATE ${table} SET ${field} = ? WHERE id = ?`).run(invalid, id);
+      await expect(auth.verifyOAuthAccessToken(accessToken, { audience: RESOURCE, scopes: ["mcp"] }))
+        .resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+      sqlite.prepare(`UPDATE ${table} SET ${field} = ? WHERE id = ?`)
+        .run(original, field === "id" ? invalid : id);
+    }
+    sqlite.exec("RELEASE grant_predicates; PRAGMA defer_foreign_keys = OFF;");
+    queries.mockImplementationOnce(() => { throw new Error("D1 unavailable"); });
+    await expect(auth.verifyOAuthAccessToken(accessToken, { audience: RESOURCE, scopes: ["mcp"] }))
+      .resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+    queries.mockRestore();
+
     const client = sqlite.prepare(`
       SELECT clientId, clientDiscoveryId, name, uri, icon, contacts,
              softwareId, softwareVersion, redirectUris
@@ -407,6 +458,14 @@ describe("Better Auth 1.7 MCP smoke", () => {
 
     sqlite.prepare("UPDATE session SET expiresAt = ? WHERE userId = ?")
       .run(new Date(Date.now() - 1_000).toISOString(), verification.userId);
+    await expect(auth.verifyOAuthAccessToken(newAccessToken, {
+      audience: RESOURCE, scopes: ["mcp"],
+    })).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
+
+    sqlite.prepare("UPDATE session SET expiresAt = ? WHERE userId = ?")
+      .run(new Date(Date.now() + 60_000).toISOString(), verification.userId);
+    const signOut = await auth.handler(jsonRequest(`${ORIGIN}/api/auth/sign-out`, {}, cookies));
+    expect(signOut.status).toBe(200);
     await expect(auth.verifyOAuthAccessToken(newAccessToken, {
       audience: RESOURCE, scopes: ["mcp"],
     })).resolves.toEqual({ ok: false, status: 401, reason: "invalid-token" });
