@@ -39,7 +39,8 @@
     "test": "pnpm test:facade-types && vitest run",
     "test:facade-types": "tsc --ignoreConfig --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --types @cloudflare/workers-types,node test/createMantleWorker.typecheck.ts",
     "bench:http-dispatch": "vitest bench --run test/http-dispatch.bench.ts",
-    "bench:wrangler": "pnpm --filter '@aotter/mantle-cloudflare^...' build && node ../../../scripts/run-wrangler-performance.mjs"
+    "bench:wrangler": "pnpm --filter '@aotter/mantle-cloudflare^...' build && node ../../../scripts/run-wrangler-performance.mjs && node test/performance/generate-parity-plan.mjs && BENCH_QUICK=1 BENCH_ROUNDS=10 node ../../../scripts/run-wrangler-parity.mjs",
+    "bench:parity": "pnpm --filter '@aotter/mantle-cloudflare^...' build && node test/performance/generate-parity-plan.mjs && node ../../../scripts/run-wrangler-parity.mjs"
   },
   "dependencies": {
     "@aotter/mantle-admin": "workspace:*",
