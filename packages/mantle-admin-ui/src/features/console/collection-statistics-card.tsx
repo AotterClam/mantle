@@ -42,9 +42,9 @@ export function CollectionStatisticsCard({ collection, canonical }: {
   const { paths, max } = stackedAreas(series);
   const chartId = React.useId();
   const color = (index: number) => `color-mix(in oklch, var(--chart-${index % 5 + 1}) 75%, var(--foreground))`;
-  const date = (value: number) => new Intl.DateTimeFormat(language, preferences.range === "1h" || preferences.range === "24h"
+  const date = (value: number) => new Intl.DateTimeFormat(language, preferences.range === "1h"
     ? { hour: "2-digit", minute: "2-digit" }
-    : { month: "short", day: "numeric", ...(preferences.range === "7d" ? { hour: "2-digit" } as const : {}) }).format(value);
+    : { month: "short", day: "numeric", ...((preferences.range === "7d" || preferences.range === "24h") ? { hour: "2-digit" } as const : {}) }).format(value);
   const seriesLabel = (name: string | null) => name === null
     ? t(language, collection.filter ? "console.stats.other" : "console.stats.new") : fieldLabel(name);
   return (
