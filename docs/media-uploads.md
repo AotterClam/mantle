@@ -184,3 +184,28 @@ Run the version-matched `media-gc` skill when an upload reached R2 but was
 never committed. It audits first and removes only stale objects without
 `committedAt` metadata after explicit operator confirmation. Do not use an R2
 lifecycle rule: committed and uncommitted media share the same purpose prefix.
+
+### R2 commit cost and recovery
+
+R2 has no metadata-only patch. Mantle retains the existing `committedAt`,
+`role`, `uploadGroupId` and filename markers by streaming each uploaded object
+through GET → PUT. Commits validate the bundle shape before I/O and process
+batches of at most three variants. A batch settles before another starts or an
+error returns. MIME/size failures cancel the unused GET stream; failed PUTs also
+attempt cancellation while preserving the original error.
+
+A successful N-variant commit still uses N GETs, N PUTs and rewrites the sum of
+variant sizes. Parallelism reduces serial waiting, not operation count or
+bytes. Streaming-fake checks cover 1 × 1 KiB, 3 × 64 KiB and 12 × 256 KiB, with
+maximum in-flight variants 1/3/3 and exact rewrite budgets; these are not remote
+R2 latency measurements. Native R2 measurements and the complete media use case's separate D1 costs
+are tracked by the shared #812 performance harness.
+
+The asset row is saved only after every variant succeeds. Partial R2 failure
+keeps the pending D1 record for retry before expiry. Already stamped objects
+remain stamped and old/new committed media remains protected by the existing
+GC rule. After pending expiry, partially stamped orphan objects require an
+operator audit against D1 references; the ordinary GC must not remove their
+markers or assume that a missing pending record means an object is unused.
+This retains the existing conservative recovery contract without moving commit
+or GC authority into KV.
