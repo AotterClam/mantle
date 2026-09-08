@@ -46,3 +46,9 @@ function escapeXml(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 }
+
+export function serializeSitemapIndex(site: WebSiteConfig, paths: readonly string[]): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
+    + paths.map((path) => `  <sitemap><loc>${escapeXml(absoluteUrl(site.origin ?? "", path))}</loc></sitemap>\n`).join("")
+    + "</sitemapindex>\n";
+}

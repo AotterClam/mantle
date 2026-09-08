@@ -118,6 +118,81 @@ describe("mountPublicRoutes response-cache contract", () => {
     await expect(markdown.text()).resolves.toContain("# Hello");
   });
 
+  it("exposes every list and llms page, including a last page without continuation", async () => {
+    const h = harness();
+    await h.ref.get();
+    for (let index = 0; index < 103; index++) {
+      h.db.entries.set(`page-${index}`, {
+        id: `page-${index}`, collection: "posts", status: "published", version: 1,
+        data: JSON.stringify({ slug: `item-${index}`, locale: "en", title: `Title-${index}`, body: "Public" }),
+        author_id: "private-author", created_at: 1, updated_at: index,
+      });
+    }
+    for (const path of ["/en/posts", "/en/posts.md", "/en/llms.txt", "/llms.txt"]) {
+      let next: string | undefined = path;
+      const titles: string[] = [];
+      let pages = 0;
+      do {
+        const response = await h.app.request(next!);
+        expect(response.status).toBe(200);
+        const body = await response.text();
+        titles.push(...[...body.matchAll(/Title-\d+/g)].map((match) => match[0]));
+        expect(body).not.toContain("private-author");
+        next = response.headers.get("link")?.match(/^<([^>]+)>; rel="next"$/)?.[1];
+        if (next) expect(body).toContain(path === "/en/posts" ? 'rel="next"' : "[Next page]");
+        pages++;
+        expect(pages).toBeLessThan(5);
+      } while (next);
+      expect(pages).toBe(3);
+      expect(titles).toEqual(Array.from({ length: 103 }, (_, index) => `Title-${102 - index}`));
+    }
+  });
+
+  it("keeps an empty final discovery page successful after a visible continuation", async () => {
+    const h = harness();
+    await h.ref.get();
+    for (let index = 0; index < 51; index++) {
+      h.db.entries.set(`empty-${index}`, {
+        id: `empty-${index}`, collection: "posts", status: "published", version: 1,
+        data: JSON.stringify({ slug: `item-${index}`, locale: "en", title: "No markdown" }),
+        author_id: null, created_at: 1, updated_at: index,
+      });
+    }
+    const first = await h.app.request("/llms.txt");
+    expect(first.status).toBe(200);
+    const next = first.headers.get("link")!.match(/^<([^>]+)>/)![1]!;
+    const last = await h.app.request(next);
+    expect(last.status).toBe(200);
+    expect(last.headers.get("link")).toBeNull();
+    await expect(last.text()).resolves.toContain("No further public documents");
+  });
+
+  it("serves a sitemap index with complete metadata-only parts", async () => {
+    const h = harness();
+    await h.ref.get();
+    for (let index = 0; index < 2021; index++) {
+      h.db.entries.set(`map-${index}`, {
+        id: `map-${index}`, collection: "posts", status: "published", version: 1,
+        data: JSON.stringify({ slug: `item-${index}`, locale: "en", body: "not needed" }),
+        author_id: null, created_at: 1, updated_at: index,
+      });
+    }
+    const index = await (await h.app.request("/sitemap.xml")).text();
+    expect(index).toContain("<sitemapindex");
+    const partUrls = [...index.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!.replace(/&amp;/g, "&"));
+    expect(partUrls).toHaveLength(2);
+    const locations: string[] = [];
+    for (const url of partUrls) {
+      const part = await (await h.app.request(url)).text();
+      expect(part).toContain("<urlset");
+      locations.push(...[...part.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!));
+    }
+    expect(new Set(locations).size).toBe(2023); // Entries plus home and list.
+    expect(locations.filter((url) => url.includes("/posts/item-"))).toHaveLength(2021);
+    expect(h.db.executions.filter(({ sql }) => sql.includes("WITH candidates"))
+      .every(({ sql }) => sql.includes("json_group_object"))).toBe(true);
+  });
+
   it("queries list content once for an uncached HTML response", async () => {
     const h = harness();
     await h.ref.get();

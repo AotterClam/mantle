@@ -9,6 +9,7 @@ import {
   composePageSeoMeta,
   serializeEntryAsMarkdown,
   type MantleWeb,
+  type ComposeSitemapRequest,
   type SeoMeta,
 } from "@aotter/mantle-web";
 import type {
@@ -146,12 +147,11 @@ export function mountPublicRoutes(
   // Literal root paths register BEFORE any param-catch-all routes —
   // Hono's trie matches `/llms.txt` against `/:locale` with
   // `:locale = "llms.txt"` if the literal route registers later.
-  app.get("/llms.txt", async () => {
+  app.get("/llms.txt", async (c) => {
     const runtime = await ref.get();
     const web = ref.web(runtime);
-    const body = await composeRootLlmsTxt(runtime, web, await runtime.siteConfig.load(), options);
-    if (!body) return textNotFound();
-    return new Response(body, { status: 200, headers: TEXT_PUBLIC });
+    const page = await composeLlmsPage(runtime, web, await runtime.siteConfig.load(), options, undefined, c.req.query("cursor"));
+    return pagedTextResponse(c, page, TEXT_PUBLIC);
   });
 
   app.get("/robots.txt", async () => {
@@ -169,8 +169,11 @@ export function mountPublicRoutes(
         status: 500,
       });
     }
-    const xml = await web.composeSitemap.execute({
+    const request: ComposeSitemapRequest = {
       site,
+      cursor: c.req.query("cursor"),
+      dataFields: web.paths.dataFields,
+      maxUrls: Math.max(1, Math.min(2000, Math.floor(40_000 / Math.max(1, site.locales.length)))),
       pathFor: (entry) => {
         const resolved = web.paths!.forEntry(entry);
         if (entry.locale || !resolved) return resolved;
@@ -190,7 +193,14 @@ export function mountPublicRoutes(
               .map((route) => localizedPath(locale, route.segment)),
           ])
         : [],
-    });
+    };
+    const page = await web.composeSitemap.execute(request);
+    const xml = c.req.query("part") === "1" || !page.nextCursor ? page.body
+      : await web.composeSitemap.index(request, (cursor) => {
+          const query = new URLSearchParams({ part: "1" });
+          if (cursor) query.set("cursor", cursor);
+          return `/sitemap.xml?${query}`;
+        });
     return new Response(xml, { status: 200, headers: SITEMAP_HEADERS });
   });
 
@@ -241,9 +251,8 @@ export function mountPublicRoutes(
     );
     if (locale === null) return textNotFound();
     const site = await runtime.siteConfig.load();
-    const body = await composeLocaleLlmsTxt(runtime, web, site, locale, options);
-    if (!body) return textNotFound();
-    return new Response(body, { status: 200, headers: TEXT_PUBLIC });
+    const page = await composeLlmsPage(runtime, web, site, options, locale, c.req.query("cursor"));
+    return pagedTextResponse(c, page, TEXT_PUBLIC);
   });
 
   for (const route of options.collectionRoutes) {
@@ -279,13 +288,14 @@ function mountCollection(
         );
         if (locale === null) return textNotFound();
         const site = await runtime.siteConfig.load();
-        const body = await web.composeLlmsTxt.execute({
+        const page = await web.composeLlmsTxt.execute({
           site,
           locale: contentLocale(runtime, route.collection, locale),
           collection: route.collection,
+          cursor: c.req.query("cursor"),
           pathFor: (entry) => entryPathForLocale(web, options.collectionRoutes, entry, locale),
         });
-        return body ? new Response(body, { status: 200, headers: MD_PUBLIC }) : textNotFound();
+        return pagedTextResponse(c, page, MD_PUBLIC);
       });
     }
     app.get(`/:locale${segPath}`, async (c) => {
@@ -310,18 +320,24 @@ function mountCollection(
         markdown: route.markdownMirror !== false,
         pathForLocale: (candidate) => localizedPath(candidate, route.segment),
       });
-      const html = await web.renderListLive.execute({
+      const page = await web.renderListLive.execute({
         collection: route.collection,
+        cursor: c.req.query("cursor"),
         locale,
         contentLocale: contentLocale(runtime, route.collection, locale),
         site,
         seo,
       });
-      if (html === null) return notFound();
-      return new Response(html, {
-        status: 200,
-        headers: liveDev ? HTML_NO_STORE : HTML_PUBLIC,
-      });
+      if (page === null) return notFound();
+      const headers = new Headers(liveDev ? HTML_NO_STORE : HTML_PUBLIC);
+      const next = continuationPath(c, page.nextCursor);
+      let html = page.html;
+      if (next) {
+        headers.set("link", `<${next}>; rel="next"`);
+        const nav = `<nav aria-label="Pagination"><a rel="next" href="${next.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}">Next</a></nav>`;
+        html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, () => `${nav}</body>`) : html + nav;
+      }
+      return new Response(html, { status: 200, headers });
     });
   }
 
@@ -465,66 +481,58 @@ async function assertStaffSession(
   return null;
 }
 
-/**
- * Cross-locale aggregate body for `/llms.txt` (no `:locale` segment).
- *
- * `ComposeLlmsTxtUseCase.execute({ locale: null })` returns
- * non-localized entries only — fine for sites with no `locales`
- * declared, but emits an effectively empty document for sites whose
- * content lives entirely in localized child schemas (the typical
- * publication / intake / landing shape).
- *
- * For those sites, concatenate the per-locale composer outputs so an
- * AI agent landing at the bare `/llms.txt` sees every published
- * locale's URL table. The composer always emits a `Locale: <tag>`
- * header in localized mode, so the sections self-separate without a
- * custom delimiter.
- */
-async function composeRootLlmsTxt(
+/** Root and locale discovery share one canonical entry page per request. */
+async function composeLlmsPage(
   runtime: CloudflareMantleRuntime,
   web: MantleWeb,
   site: SiteConfig,
   options: MountPublicRoutesOptions,
-): Promise<string | null> {
+  locale?: string,
+  cursor?: string,
+): Promise<{ body: string | null; nextCursor?: string }> {
+  const locales = locale ? [locale] : site.locales;
   const parts: string[] = [];
-  if (site.locales.length === 0) {
-    return web.composeLlmsTxt.execute({ site, locale: null });
-  }
-  for (const locale of site.locales) {
-    const body = await composeLocaleLlmsTxt(runtime, web, site, locale, options);
-    if (body) parts.push(body);
-  }
-  return parts.length > 0 ? parts.join("\n---\n\n") : null;
-}
-
-async function composeLocaleLlmsTxt(
-  runtime: CloudflareMantleRuntime,
-  web: MantleWeb,
-  site: SiteConfig,
-  locale: string,
-  options: MountPublicRoutesOptions,
-): Promise<string | null> {
-  const parts: string[] = [];
-  if (options.homeMarkdown) {
-    if (await options.homeMarkdown({ runtime, site, locale })) {
-      parts.push(
-        `# ${site.title}\n\nLocale: ${locale}\n\n## Pages\n\n- [${site.title}](${absoluteUrl(site.origin, `${localizedPath(locale)}.md`)})\n`,
-      );
+  if (!cursor && options.homeMarkdown) {
+    for (const candidate of locales) {
+      if (await options.homeMarkdown({ runtime, site, locale: candidate })) {
+        parts.push(`# ${site.title}\n\nLocale: ${candidate}\n\n## Pages\n\n- [${site.title}](${absoluteUrl(site.origin, `${localizedPath(candidate)}.md`)})\n`);
+      }
     }
   }
-  const entries = await web.composeLlmsTxt.execute({
+  const page = await web.composeLlmsTxt.execute({
     site,
-    locale,
+    locale: locale ?? (locales.length ? undefined : null),
+    locales: locale || !locales.length ? undefined : locales,
     includeUnlocalized: true,
-    pathFor: (entry) => {
-      const route = options.collectionRoutes.find((candidate) => candidate.collection === entry.collection);
+    cursor,
+    pathFor: (entry, candidate) => {
+      const route = options.collectionRoutes.find((value) => value.collection === entry.collection);
       const slug = typeof entry.data["slug"] === "string" ? entry.data["slug"] : entry.id;
       if (options.homeMarkdown && route?.homeSlug === slug) return null;
-      return entryPathForLocale(web, options.collectionRoutes, entry, locale);
+      return entryPathForLocale(web, options.collectionRoutes, entry, candidate);
     },
   });
-  if (entries) parts.push(entries);
-  return parts.length > 0 ? parts.join("\n---\n\n") : null;
+  if (page?.body) parts.push(page.body);
+  return { body: parts.length ? parts.join("\n---\n\n") : null, nextCursor: page?.nextCursor };
+}
+
+function continuationPath(c: Context, cursor?: string): string | null {
+  if (!cursor) return null;
+  const url = new URL(c.req.url);
+  url.searchParams.set("cursor", cursor);
+  return url.pathname + url.search;
+}
+
+function pagedTextResponse(
+  c: Context,
+  page: { body: string | null; nextCursor?: string } | null,
+  initialHeaders: HeadersInit,
+): Response {
+  const next = continuationPath(c, page?.nextCursor);
+  if (!page || (!page.body && !next && !c.req.query("cursor"))) return textNotFound();
+  const headers = new Headers(initialHeaders);
+  if (next) headers.set("link", `<${next}>; rel="next"`);
+  return new Response((page.body ?? (next ? "" : "# No further public documents\n")) + (next ? `\n## Continue\n\n- [Next page](${next})\n` : ""), { headers });
 }
 
 function lazySite(runtime: CloudflareMantleRuntime): () => Promise<SiteConfig> {

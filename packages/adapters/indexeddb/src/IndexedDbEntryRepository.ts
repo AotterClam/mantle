@@ -22,6 +22,9 @@ import {
   type ReadEntryByDataFieldArgs,
   type ReadEntryBySlugArgs,
   type ReadPublishedEntriesArgs,
+  type ReadPublishedPageArgs,
+  type PublishedEntryPage,
+  paginatePublishedEntries,
   type TransitionStatusArgs,
   type UpdateEntryArgs,
 } from "@aotter/mantle-runtime";
@@ -232,6 +235,7 @@ export class IndexedDbEntryRepository implements EntryRepository, EntryReader {
 
   async readByDataFieldIn(args: ReadEntriesByDataFieldInArgs): Promise<readonly Entry[]> {
     const values = new Set(args.values);
+    const seen = new Set<unknown>();
     return (await this.allRows(args.collection))
       .filter((entry) => !args.status || entry.status === args.status)
       .filter((entry) => matchesLocale(entry, args.locale))
@@ -241,6 +245,13 @@ export class IndexedDbEntryRepository implements EntryRepository, EntryReader {
           typeof value === "boolean") && values.has(value);
       })
       .sort(newestFirst)
+      .filter((entry) => {
+        if (!args.latestPerValue) return true;
+        const value = entry.data[args.field];
+        if (seen.has(value)) return false;
+        seen.add(value);
+        return true;
+      })
       .map(projectPublicEntry);
   }
 
@@ -253,6 +264,15 @@ export class IndexedDbEntryRepository implements EntryRepository, EntryReader {
       ? Math.floor(args.limit)
       : rows.length;
     return rows.slice(0, limit).map(projectPublicEntry);
+  }
+
+  async readPublishedPage(args: ReadPublishedPageArgs = {}): Promise<PublishedEntryPage> {
+    // ponytail: browser adapter scans its collection; add an IndexedDB compound
+    // cursor when browser-local datasets need bounded storage I/O as well as output.
+    const rows = await this.readPublished({ collection: args.collection,
+      locale: args.includeUnlocalized && typeof args.locale === "string" ? undefined : args.locale });
+    return paginatePublishedEntries(args.includeUnlocalized && typeof args.locale === "string"
+      ? rows.filter((entry) => entry.locale === args.locale || entry.locale == null) : rows, args);
   }
 
   async findManyByDataField(

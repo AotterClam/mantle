@@ -59,8 +59,8 @@ describe("ComposeLlmsTxtUseCase", () => {
       data: { slug: "ni-hao", title: "你好", content: "正文" },
     });
     const out = await new ComposeLlmsTxtUseCase(new DatabaseEntryRepository(db), paths).execute({ site, locale: "en" });
-    expect(out).toContain("[Hello]");
-    expect(out).not.toContain("[你好]");
+    expect(out?.body).toContain("[Hello]");
+    expect(out?.body).not.toContain("[你好]");
   });
 
   it("locale: null returns only non-localized entries (matches publish semantics)", async () => {
@@ -77,8 +77,8 @@ describe("ComposeLlmsTxtUseCase", () => {
       data: { slug: "intro", title: "Intro", content: "Welcome" },
     });
     const out = await new ComposeLlmsTxtUseCase(new DatabaseEntryRepository(db), paths).execute({ site, locale: null });
-    expect(out).toContain("[Intro]");
-    expect(out).not.toContain("[Hello]");
+    expect(out?.body).toContain("[Intro]");
+    expect(out?.body).not.toContain("[Hello]");
   });
 });
 
@@ -92,10 +92,10 @@ describe("ComposeSitemapUseCase", () => {
       data: { slug: "hello" },
     });
     const out = await new ComposeSitemapUseCase(new DatabaseEntryRepository(db)).execute({ site });
-    expect(out).toMatch(/<\?xml version="1\.0"/);
-    expect(out).toContain("<urlset");
-    expect(out).toContain("<loc>https://example.com/en/posts/hello</loc>");
-    expect(out).toContain("<lastmod>");
+    expect(out?.body).toMatch(/<\?xml version="1\.0"/);
+    expect(out?.body).toContain("<urlset");
+    expect(out?.body).toContain("<loc>https://example.com/en/posts/hello</loc>");
+    expect(out?.body).toContain("<lastmod>");
   });
 
   it("custom pathFor remaps storage shape → public route shape", async () => {
@@ -123,8 +123,8 @@ describe("ComposeSitemapUseCase", () => {
         return null;
       },
     });
-    expect(out).toContain("<loc>https://example.com/en/posts/hello</loc>");
-    expect(out).toContain("<loc>https://example.com/zh-tw/posts/hello</loc>");
+    expect(out?.body).toContain("<loc>https://example.com/en/posts/hello</loc>");
+    expect(out?.body).toContain("<loc>https://example.com/zh-tw/posts/hello</loc>");
   });
 
   it("pathFor returning null skips the entry", async () => {
@@ -144,8 +144,8 @@ describe("ComposeSitemapUseCase", () => {
       site,
       pathFor: (e) => (e.collection === "internal" ? null : `/${e.collection}/${(e.data as { slug?: string }).slug}`),
     });
-    expect(out).toContain("/posts/hello");
-    expect(out).not.toContain("/internal/");
+    expect(out?.body).toContain("/posts/hello");
+    expect(out?.body).not.toContain("/internal/");
   });
 
   it("maxUrls caps the SQL read (not just the JS array)", async () => {
@@ -159,8 +159,18 @@ describe("ComposeSitemapUseCase", () => {
       });
     }
     const out = await new ComposeSitemapUseCase(new DatabaseEntryRepository(db)).execute({ site, maxUrls: 3 });
-    const urlCount = (out.match(/<url>/g) ?? []).length;
+    const urlCount = (out.body.match(/<url>/g) ?? []).length;
     expect(urlCount).toBe(3);
+  });
+
+  it("rejects custom sitemap expansion beyond protocol limits instead of dropping URLs", async () => {
+    const db = new InMemoryDatabase();
+    seedPublished(db, { id: "p1", collection: "posts", data: { slug: "hello" } });
+    const sitemap = new ComposeSitemapUseCase(new DatabaseEntryRepository(db));
+    await expect(sitemap.execute({ site, pathFor: () => Array.from({ length: 50_001 }, (_, i) => `/item-${i}`) }))
+      .rejects.toThrow("50,000 URLs");
+    await expect(sitemap.index({ site }, () => "/" + "x".repeat(50 * 1024 * 1024)))
+      .rejects.toThrow("50 MiB");
   });
 
   it("XML-escapes ampersands in origins / paths", async () => {
@@ -174,7 +184,7 @@ describe("ComposeSitemapUseCase", () => {
     const out = await new ComposeSitemapUseCase(new DatabaseEntryRepository(db)).execute({
       site: { ...site, origin: "https://x.com?a=1&b=2" },
     });
-    expect(out).toContain("&amp;");
-    expect(out).not.toMatch(/&[^a-z#]/);
+    expect(out?.body).toContain("&amp;");
+    expect(out?.body).not.toMatch(/&[^a-z#]/);
   });
 });

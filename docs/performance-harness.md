@@ -93,7 +93,7 @@ diagnostic, while query/row counts are the stable assertions.
 |---|---|
 | Public cache hits read D1 first | Removed from Worker code. Cloudflare's entrypoint Workers Cache runs before the Worker; Core has no inner render cache. |
 | Slug/locale reads bypass generated indexes | Fixed by the shared schema-aware entry-read boundary. A 10,000-row page MISS measured 2 queries / 5 rows read. |
-| OFFSET pagination | Accepted for the v0.1 bounded-result surfaces: every response is capped at 500 rows and public hot paths must stay shallow. Deep/export workloads require a purpose-shaped cursor API before they are declared hot. |
+| OFFSET pagination | Retained only where the View/Admin contract explicitly uses it, with a 500-row response cap. Public content lists and discovery now use forward keyset pages; they are not covered by the old 500-row claim. |
 | Admin substring search scans | Accepted only for the authenticated Admin collection browser, with a 500-row response cap. Large/search-heavy sites should add a purpose-shaped indexed View or dedicated search service; do not expose this scan publicly. |
 | Published list/sitemap/llms paths lack system indexes | Fixed with measured partial indexes for published global, locale, collection, and collection+locale ordering. The 100-row and 10,000-row API runs both measured 1 query / 20 rows read. |
 | Page MISS waits for cache write-back | Removed. Origin rendering returns directly; Workers Cache owns response storage outside the Worker. |
@@ -125,3 +125,45 @@ The 1/10/100/1,000-route regression uses four segment lookups at every size;
 overlapping wildcard shapes can visit multiple branches, pruned by route rank.
 The HTTP microbench and workerd harness include the same route-count axis.
 Workerd wall times include I/O and are not CPU measurements or a fixed-ms CI gate.
+
+### Public content pages and discovery (#809)
+
+| Surface | Canonical read / continuation |
+|---|---|
+| Collection HTML and collection Markdown | 50 entries by default, forward `cursor`; visible Next link plus HTTP `Link: rel="next"`. |
+| Locale and root llms.txt | One canonical page, default 50 entries; root expands that page across configured locales in memory. Shared entries are not reread once per locale. Follow the body/HTTP continuation link. |
+| Sitemap part | Up to 2,000 entries, with only declared path fields (built-in resolver: `slug`). A small site returns a urlset directly; a larger site returns a sitemap index linking every part. |
+| Sitemap index | Walks metadata pages to derive exact part cursors; O(N) metadata work on an index MISS, with one page resident at a time. It is not a constant-work list endpoint. |
+
+`EntryReader.readPublishedPage` caps returned data JSON at 1 MiB and 2,000 rows.
+One oversized entry is returned alone to make progress. SQLite applies the byte
+budget before transferring/parsing JSON in the Worker; one extra candidate
+identifies continuation. A localized + shared page merges two indexed ranges
+inside the same statement. The original `readPublished` remains an explicit
+unbounded read unless its caller supplies a limit.
+
+Translation lists resolve at most one newest published parent per join value,
+then resolve media once for the bounded list. Parent payloads and media metadata
+are additional input; the 1 MiB budget describes the canonical child page, not
+arbitrary template output or total Worker heap. Custom renderers own their output
+size. IndexedDB keeps identical page semantics but currently scans its local
+collection; this is not a claim of bounded IndexedDB storage I/O.
+
+The real SQLite fixture matrix covers 100/10,000/50,000 published rows, 64 B/4 KiB
+bodies, and 1/3/10 locales. At limit 20, every case transfers 21 candidate rows;
+4 KiB body data occupies 87,003–87,129 bytes, independent of collection size.
+Complete llms traversal uses 2/200/1,000 statements at the default 50-row page
+size, independent of locale count. Sitemap and llms URL sets match, including
+275,000 URLs for 50,000 mixed localized/shared rows across 10 locales.
+
+Run `pnpm --filter @aotter/mantle-cloudflare exec vitest run
+test/public-content-scaling.test.ts` to emit JSON transfer sizes and traversal
+CPU/wall/RSS diagnostics. These are Node + SQLite + assertions, including the
+fixture database and URL-validation set; RSS is a process high-water mark, not
+per-request Worker peak memory. Worker CPU, true cache HIT/MISS and placement
+measurements belong to the matched native/full-stack harness (#812).
+
+The workerd smoke also measures public list, llms and sitemap. The first two
+use two warm statements (settings + page) and bounded D1 work. Sitemap index
+queries and rows-read scale with the number of metadata parts; this explicit
+cost preserves complete discovery instead of silently dropping URLs.

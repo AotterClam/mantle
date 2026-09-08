@@ -42,6 +42,8 @@ export type {
   ReadEntryByDataFieldArgs,
   ReadEntriesByDataFieldInArgs,
   ReadPublishedEntriesArgs,
+  ReadPublishedPageArgs,
+  PublishedEntryPage,
   FindManyEntriesByDataFieldArgs,
 } from "./EntryReader.js";
 export type {

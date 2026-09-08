@@ -79,6 +79,8 @@ export type {
   ReadEntryByDataFieldArgs,
   ReadEntriesByDataFieldInArgs,
   ReadPublishedEntriesArgs,
+  ReadPublishedPageArgs,
+  PublishedEntryPage,
   FindManyEntriesByDataFieldArgs,
 } from "./domain/port/EntryReader.js";
 export {
@@ -109,6 +111,7 @@ export {
   clampShow,
 } from "./domain/service/Pagination.js";
 export {
+  paginatePublishedEntries,
   decodeEntrySortCursor,
   encodeEntrySortCursor,
 } from "./infrastructure/persistence/Pagination.js";
