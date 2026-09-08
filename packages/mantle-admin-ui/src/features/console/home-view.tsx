@@ -153,7 +153,6 @@ export function HomeView(): React.ReactElement {
 
       <section aria-labelledby="collections-heading">
         <h2 id="collections-heading" className="mb-4 text-xl font-semibold">{t(language, "console.collections.title")}</h2>
-        <p className="mb-5 text-xs text-muted-foreground">{t(language, "console.stats.explanation")}</p>
 
         {collectionsQuery.isLoading && (
           <div className="space-y-2">
@@ -174,7 +173,7 @@ export function HomeView(): React.ReactElement {
           <div className="space-y-6">
             {collectionGroups.map((group) => (
               <div key={group.title}>
-                <h3 className="mb-3 text-sm font-medium text-muted-foreground">{group.title}</h3>
+                {collectionGroups.length > 1 && <h3 className="mb-3 text-sm font-medium text-muted-foreground">{group.title}</h3>}
                 <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                   {group.items.map((collection) => <CollectionStatisticsCard key={collection.name} collection={collection} canonical={canonical} />)}
                 </div>

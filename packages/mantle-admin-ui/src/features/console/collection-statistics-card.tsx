@@ -36,7 +36,6 @@ export function CollectionStatisticsCard({ collection, canonical }: {
     refetchInterval: 60_000,
   });
   const title = resolveLocalizedText(collection.title, language, canonical) ?? fieldLabel(collection.name);
-  const description = resolveLocalizedText(collection.description, language, canonical);
   const number = new Intl.NumberFormat(language);
   const data = query.data;
   const series = data ? statisticsSeries(data, collection.filter?.values, preferences.mode === "cumulative") : [];
@@ -49,10 +48,10 @@ export function CollectionStatisticsCard({ collection, canonical }: {
   const seriesLabel = (name: string | null) => name === null
     ? t(language, collection.filter ? "console.stats.other" : "console.stats.new") : fieldLabel(name);
   return (
-    <SectionCard className="min-w-0 p-5">
+    <SectionCard className="min-w-0 gap-3 p-4">
       <div className="flex items-start justify-between gap-2">
         <a href={`/admin/c/${encodeURIComponent(collection.name)}`} className="group min-w-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <h4 className="font-medium group-hover:underline">{title}</h4>
+          <h4 className="text-sm font-medium group-hover:underline">{title}</h4>
         </a>
         {data && !query.isError ? <Button asChild variant="ghost" size="icon" className="-mt-1 size-7 shrink-0 text-muted-foreground">
           <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(statisticsCsv(data, series, preferences.mode))}`}
@@ -62,8 +61,13 @@ export function CollectionStatisticsCard({ collection, canonical }: {
           </a>
         </Button> : null}
       </div>
-      {description && <p className="mt-1 truncate text-xs text-muted-foreground" title={description}>{description}</p>}
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+      {data && !query.isError && (
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-3xl font-semibold tabular-nums tracking-tight" aria-label={`${t(language, "console.stats.total")}: ${number.format(data.total)}`} title={t(language, "console.stats.total")}>{number.format(data.total)}</p>
+          <p className="text-xs text-muted-foreground">{t(language, "console.stats.inRange", { count: number.format(series.reduce((sum, row) => sum + row.intervalTotal, 0)) })}</p>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Select value={preferences.range} onValueChange={(range) => updatePreferences({ ...preferences, range: range as StatisticsPreferences["range"] })}>
           <SelectTrigger className="text-xs" aria-label={`${title} · ${t(language, "console.stats.range")}`}>
             <SelectValue />
@@ -73,19 +77,15 @@ export function CollectionStatisticsCard({ collection, canonical }: {
           </SelectContent>
         </Select>
         <div className="inline-flex rounded-md border border-input p-0.5" role="group" aria-label={`${title} · ${t(language, "console.stats.mode")}`}>
-          {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode}
-            onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.${mode}`)}</Button>)}
+          {(["interval", "cumulative"] as const).map((mode) => <Button key={mode} variant={preferences.mode === mode ? "secondary" : "ghost"} size="sm" className="h-7 px-2 text-xs" aria-pressed={preferences.mode === mode} aria-label={t(language, `console.stats.${mode}`)} title={t(language, `console.stats.${mode}`)}
+            onClick={() => updatePreferences({ ...preferences, mode })}>{t(language, `console.stats.short.${mode}`)}</Button>)}
         </div>
       </div>
-      {query.isPending ? <Skeleton className="mt-5 h-52" /> : query.isError ? (
+      {query.isPending ? <Skeleton className="h-40" /> : query.isError ? (
         query.error instanceof ApiError && query.error.status === 501
           ? <p className="py-8 text-sm text-muted-foreground">{t(language, "console.stats.unavailable")}</p>
           : <ErrorBox error={query.error} />
       ) : data ? <>
-        <div className="my-4 flex items-baseline justify-between gap-3">
-          <div><p className="text-xs text-muted-foreground">{t(language, "console.stats.total")}</p><p className="text-3xl font-semibold tabular-nums tracking-tight">{number.format(data.total)}</p></div>
-          <p className="text-xs text-muted-foreground">{t(language, "console.stats.inRange", { count: number.format(series.reduce((sum, row) => sum + row.intervalTotal, 0)) })}</p>
-        </div>
         <svg viewBox="0 0 384 140" className="w-full text-muted-foreground" role="img" aria-labelledby={chartId}>
           <title id={chartId}>{title} · {t(language, preferences.mode === "cumulative" ? "console.stats.cumulative" : "console.stats.interval")} · {number.format(max === 1 && !series.some((row) => row.intervalTotal) ? 0 : max)}</title>
           {[16, 64, 112].map((y) => <line key={y} x1="36" x2="372" y1={y} y2={y} stroke="currentColor" strokeOpacity="0.15" strokeDasharray={y === 112 ? undefined : "3 4"} />)}
@@ -95,7 +95,7 @@ export function CollectionStatisticsCard({ collection, canonical }: {
           <text x="36" y="134" fill="currentColor" fontSize="10">{date(data.from)}</text>
           <text x="372" y="134" textAnchor="end" fill="currentColor" fontSize="10">{date(data.to)}</text>
         </svg>
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {series.map((row, i) => <span key={row.name ?? "other"} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: color(i) }} />{seriesLabel(row.name)} <span className="tabular-nums">{number.format(row.intervalTotal)}</span></span>)}
         </div>
 
