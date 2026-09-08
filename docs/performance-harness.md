@@ -104,3 +104,13 @@ not patterns for new public APIs. Re-measure before widening either scope.
 
 See also [Schema indexes](./schema-indexes.md) and the official Cloudflare
 [D1 index guidance](https://developers.cloudflare.com/d1/best-practices/use-indexes/).
+
+### Prepared database, new Worker state
+
+The Wrangler fixture resets its in-isolate runtime after seeding while retaining
+D1. The first public page has a four-statement budget (fingerprint, lazy locale,
+site settings, entry); subsequent origin pages have a two-statement budget.
+This is a new application state in the same workerd isolate, not a measurement
+of module startup CPU or an entrypoint cache HIT. Locale caching is enabled by
+a successful preparation fingerprint; editable settings and media policy still
+read the canonical database on every call.

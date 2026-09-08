@@ -104,6 +104,11 @@ export class DatabaseSiteConfigRepository implements SiteConfigRepository {
 
   constructor(private readonly db: DatabaseDriver) {}
 
+  /** A current deployment fingerprint proves the code-owned locale policy is ready. */
+  usePreparedLocales(): void {
+    this.cacheLocales = true;
+  }
+
   async seed(defaults: SiteDefaults | undefined): Promise<void> {
     this.cacheLocales = false;
     this.cachedLocales = undefined;

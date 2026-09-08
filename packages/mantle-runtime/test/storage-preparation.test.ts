@@ -3,7 +3,7 @@ import {
   parseManifestSources,
   type LinkedManifestSet,
 } from "@aotter/mantle-spec";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   MantleStorageAdapter,
   PreparedMantleStorage,
@@ -51,6 +51,68 @@ describe("prepareDeployment", () => {
     expect(db.executions.slice(before).map(({ sql }) => sql)).toEqual([
       "SELECT fingerprint FROM _mantle_boot_state WHERE id = ? LIMIT 1",
     ]);
+  });
+
+  it("activates locales on a new adapter over a current database without reseeding", async () => {
+    const db = new InMemoryDatabase();
+    const plan = compilePlan(declarativeManifest);
+    const defaults = { locales: ["en"] };
+    await prepareDeployment(plan, new SqliteMantleStorageAdapter(db, defaults));
+    const migrations = vi.spyOn(db.migrations, "runAll");
+    const before = db.executions.length;
+    const fresh = new SqliteMantleStorageAdapter(db, defaults, {
+      decorateSiteConfigRepository: (canonical) => ({
+        seed: (values) => canonical.seed(values),
+        load: () => canonical.load(),
+        readLocales: () => canonical.readLocales(),
+        readMediaPurposes: () => canonical.readMediaPurposes(),
+      }),
+    });
+    const seed = vi.spyOn(fresh.siteConfig, "seed");
+    const prepared = await prepareDeployment(plan, fresh);
+    expect(migrations).not.toHaveBeenCalled();
+    expect(seed).not.toHaveBeenCalled();
+    expect(db.executions.slice(before)).toHaveLength(1);
+    for (let i = 0; i < 3; i++) {
+      expect(await prepared.storage.localePolicy?.readLocales()).toEqual(["en"]);
+    }
+    expect(db.executions.slice(before)).toHaveLength(2);
+    expect(db.executions.slice(before).every(({ sql }) => sql.startsWith("SELECT"))).toBe(true);
+
+    db.siteConfig.set("title", "Edited live");
+    db.siteConfig.set("mediaPurposes", JSON.stringify([{ name: "new-purpose" }]));
+    expect((await fresh.siteConfig.load()).title).toBe("Edited live");
+    expect(await fresh.siteConfig.readMediaPurposes()).toEqual([{ name: "new-purpose" }]);
+  });
+
+  it("isolates locale snapshots by database and resets them when a revision retries", async () => {
+    const db = new InMemoryDatabase();
+    const defaults = { locales: ["en"] };
+    const plan = compilePlan(declarativeManifest);
+    const adapter = new SqliteMantleStorageAdapter(db, defaults);
+    await prepareDeployment(plan, adapter);
+    expect(await adapter.siteConfig.readLocales()).toEqual(["en"]);
+    const other = new SqliteMantleStorageAdapter(new InMemoryDatabase(), { locales: ["ja"] });
+    await prepareDeployment(plan, other);
+    expect(await other.siteConfig.readLocales()).toEqual(["ja"]);
+
+    defaults.locales = ["zh"];
+    const runAll = db.migrations.runAll;
+    vi.spyOn(db.migrations, "runAll")
+      .mockImplementationOnce(runAll)
+      .mockRejectedValueOnce(new Error("index reconciliation failed"));
+    await expect(prepareDeployment(plan, adapter)).rejects.toThrow("index reconciliation failed");
+    defaults.locales = ["fr"];
+    await prepareDeployment(plan, adapter);
+    expect(await adapter.siteConfig.readLocales()).toEqual(["fr"]);
+    const changedPlan = compilePlan(declarativeManifest.replace("Posts", "Updated posts"));
+    const seed = vi.spyOn(adapter.siteConfig, "seed");
+    await prepareDeployment(changedPlan, adapter);
+    expect(seed).toHaveBeenCalledOnce();
+    const current = new SqliteMantleStorageAdapter(db, defaults);
+    await prepareDeployment(changedPlan, current);
+    expect(await current.siteConfig.readLocales()).toEqual(["fr"]);
+    expect(await other.siteConfig.readLocales()).toEqual(["ja"]);
   });
 
   it("uses one injected site-config repository for preparation and runtime binding", async () => {

@@ -51,13 +51,14 @@ export interface SqliteMantleStorageAdapterOptions {
 export class SqliteMantleStorageAdapter implements MantleStorageAdapter {
   readonly nativeViewDialects = ["sqlite"] as const;
   readonly siteConfig: SiteConfigRepository;
+  private readonly canonicalSiteConfig: DatabaseSiteConfigRepository;
 
   constructor(
     private readonly db: DatabaseDriver,
     private readonly siteDefaults?: SiteDefaults,
     options: SqliteMantleStorageAdapterOptions = {},
   ) {
-    const canonical = new DatabaseSiteConfigRepository(db);
+    const canonical = this.canonicalSiteConfig = new DatabaseSiteConfigRepository(db);
     this.siteConfig = options.decorateSiteConfigRepository?.(canonical) ?? canonical;
   }
 
@@ -67,7 +68,10 @@ export class SqliteMantleStorageAdapter implements MantleStorageAdapter {
       semanticFingerprint: plan.semanticFingerprint,
       siteDefaults: this.siteDefaults,
     });
-    if (await isBootCurrent(this.db, fingerprint)) return prepared;
+    if (await isBootCurrent(this.db, fingerprint)) {
+      this.canonicalSiteConfig.usePreparedLocales();
+      return prepared;
+    }
 
     await this.db.migrations.runAll(CANONICAL_MIGRATIONS);
     await this.siteConfig.seed(this.siteDefaults);

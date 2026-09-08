@@ -54,6 +54,17 @@ try {
   });
 
   await seed(10_000);
+  await checkedFetch(`${baseUrl}/__reset`);
+  const freshStatePage = await benchmarkHttpRoutes({
+    targets: [{ name: "page-current-db-new-state", url: `${baseUrl}/en/posts/post-0` }],
+    rounds: 1,
+    warmup: 0,
+  });
+  const warmStatePage = await benchmarkHttpRoutes({
+    targets: [{ name: "page-current-db-warm-state", url: `${baseUrl}/en/posts/post-0` }],
+    rounds: 3,
+    warmup: 0,
+  });
   const crowded = await benchmarkHttpRoutes({
     targets: [{ name: "api-10000", url: `${baseUrl}/api/views/recent-posts` }],
     rounds: 10,
@@ -131,6 +142,8 @@ try {
   const publicCreateRows = metric(publicCreate, "rowsRead");
   const publicCreateQueries = metric(publicCreate, "queryCount");
   const gates = {
+    currentDatabaseFirstPageUsesFourQueries: metric(freshStatePage, "queryCount").max <= 4,
+    currentDatabaseWarmPageUsesTwoQueries: metric(warmStatePage, "queryCount").max <= 2,
     crowdedRowsReadBounded: crowdedRows.p95 <= Math.max(100, smallRows.p95 * 4),
     publicApiUsesOneQuery: crowdedQueries.max <= 1,
     pageMissStaysBounded: missQueries.max <= 2 && missRows.p95 <= 10,
@@ -149,6 +162,8 @@ try {
     datasets: [100, 10_000],
     results: [
       ...small.results,
+      ...freshStatePage.results,
+      ...warmStatePage.results,
       ...crowded.results,
       ...misses.results,
       ...admin.results,

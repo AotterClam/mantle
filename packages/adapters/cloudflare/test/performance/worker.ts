@@ -199,6 +199,10 @@ export default {
   async fetch(request: Request, env: Env, executionCtx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/__health") return new Response("ok");
+    if (url.pathname === "/__reset") {
+      state = null;
+      return new Response("reset");
+    }
     if (url.pathname === "/__seed") {
       return seed(env, Number(url.searchParams.get("until") ?? 0));
     }
