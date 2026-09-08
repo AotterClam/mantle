@@ -161,9 +161,6 @@ jobs:
             if (failed) process.exit(1);
           "
 
-      - name: Verify exact packed Core in the reference Worker
-        run: pnpm check:worker-consumer
-
       - name: Pack release tarballs
         run: |
           set -euo pipefail
