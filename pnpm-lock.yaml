@@ -31,8 +31,8 @@ catalogs:
       specifier: ^26
       version: 26.1.1
     '@vercel/functions':
-      specifier: ^3.9.3
-      version: 3.9.3
+      specifier: ^3.9.5
+      version: 3.9.6
     '@vitest/browser-playwright':
       specifier: 4.1.11
       version: 4.1.11
@@ -181,7 +181,7 @@ importers:
         version: link:../../mantle-runtime
       '@vercel/functions':
         specifier: 'catalog:'
-        version: 3.9.3(ws@8.21.3)
+        version: 3.9.6(ws@8.21.3)
     devDependencies:
       '@aotter/mantle-spec':
         specifier: workspace:*
@@ -2145,15 +2145,15 @@ packages:
   '@types/ws@8.18.1':
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
-  '@vercel/cli-config@0.2.3':
-    resolution: {integrity: sha512-Ggh0Wmi92TUkUexmSUPkkDtvJmbjUr7IvF5T3FkSsWrXXs3GFzOujfxFpECdJZpux1JG4SWDv9BT4w++TDgD6A==}
+  '@vercel/cli-config@0.2.5':
+    resolution: {integrity: sha512-WniFxgznIPZ3h1USCLxArTyvR2a3/lvZW5mSSkuI2r8rQWEzUV8qnKXJEOFrVnVWe2YDxeCVMgZoxIH4kHA92Q==}
 
   '@vercel/cli-exec@1.0.1':
     resolution: {integrity: sha512-g9XerViJ/paZujufXYcu5XYI2vU2rtB4sgdpjUHde5RnOkdmpu0ngH46LCFGHoPXO/C+qDPSczIHIRN+8Q2YKQ==}
     engines: {node: '>= 18'}
 
-  '@vercel/functions@3.9.3':
-    resolution: {integrity: sha512-cbzTdASCZDnufrABc8oO00e/FqlqFFSdld+iGZPhrWBDHP4Pu8ESKKYIzASqYvbYYUIWujBvEa5LLCcZzm7WEw==}
+  '@vercel/functions@3.9.6':
+    resolution: {integrity: sha512-00NG7F+VItu1UygM0IL6QqmGrzUAeHMCUNMq89bcsbnBqoE3Gpya9yn3g+TBGDbAFjuaojJCzLNYUVFt+reSnQ==}
     engines: {node: '>= 20'}
     peerDependencies:
       '@aws-sdk/credential-provider-web-identity': '*'
@@ -2164,8 +2164,8 @@ packages:
       ws:
         optional: true
 
-  '@vercel/oidc@3.8.4':
-    resolution: {integrity: sha512-FGNvVZ5pgX9FaBqkPt6VkYFZ6bWAMDzYi7nxW+1Xt+Z4fn5PuTULVwsxjKc+0uKhysyWBQmvsmM50Oh6C2/oMA==}
+  '@vercel/oidc@3.8.6':
+    resolution: {integrity: sha512-0gAPrFB1eVCLBVDDG1PUxs+G5OS97260GK2TEcUB2TeEeWM+17P4U9xC7ASp6f9rv/pu8tBceH5cmRV0MpUhGA==}
     engines: {node: '>= 20'}
 
   '@vitejs/plugin-react@6.0.5':
@@ -5676,7 +5676,7 @@ snapshots:
     dependencies:
       '@types/node': 26.1.1
 
-  '@vercel/cli-config@0.2.3':
+  '@vercel/cli-config@0.2.5':
     dependencies:
       xdg-app-paths: 5.5.1
       zod: 4.1.11
@@ -5685,15 +5685,15 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
-  '@vercel/functions@3.9.3(ws@8.21.3)':
+  '@vercel/functions@3.9.6(ws@8.21.3)':
     dependencies:
-      '@vercel/oidc': 3.8.4
+      '@vercel/oidc': 3.8.6
     optionalDependencies:
       ws: 8.21.3
 
-  '@vercel/oidc@3.8.4':
+  '@vercel/oidc@3.8.6':
     dependencies:
-      '@vercel/cli-config': 0.2.3
+      '@vercel/cli-config': 0.2.5
       '@vercel/cli-exec': 1.0.1
       jose: 5.10.0
 
