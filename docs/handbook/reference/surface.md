@@ -178,7 +178,9 @@ The umbrella installs Spec and Runtime only. Web, Admin, Admin UI, Bun, Vercel a
 
 ## Versions
 
-This handbook ships inside the `@aotter/mantle` package and describes the release it ships with. Every fact and every source link on these pages refers to that same commit, so the copy in your `node_modules` matches your installed runtime.
+This handbook was added on the development branch after `v0.1.0-alpha.17`. It describes that development snapshot and will ship with a future release; it is not included in the published `0.1.0-alpha.17` package. For a registry installation, use the documentation at the matching release tag. For a source-built package, record the source commit as well as the package version: a development checkout can still carry the previous release version.
+
+The documentation site pins its handbook commit in `docs/handbook.json` and records its vendored SDK source in `vendor/mantle/SOURCE.txt`. Those commits may differ when the intervening changes are behavior-neutral; the site verifies that condition during the build. The site's source-built tarballs are not the npm `alpha.17` artifacts.
 
 `0.1.0-alpha.17` is immutable and no stable `0.1.0` is planned; the first stable target is `0.1.2`. That line removes the scaffolding path — the `mantle create` command, the bundle-oriented `mantle update` command, and the `@aotter/mantle/provision` subpath — with no aliases and no replacement scaffold command. `generate`, `skills`, `validate` and `emit-openapi` remain, and generation and runtime Web rendering keep their existing responsibilities. New projects are authored directly: write the manifests, run `generate`, wire the Worker. The reasoning is [ADR-0021](../../../docs/adr/0021-retire-starter-scaffolding.md).
 

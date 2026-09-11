@@ -100,9 +100,8 @@ The same Worker is producer and consumer. Opt-in adds only the dispatcher bindin
 Route on `batch.queue` when the Worker also consumes its own queues:
 
 ```ts
-const mantleQueue = createQueueHandler<Env>({ get: () => worker.getRuntime(env) });
-
 queue(batch, env, ctx) {
+  const mantleQueue = createQueueHandler<Env>({ get: () => worker.getRuntime(env) });
   switch (batch.queue) {
     case "mantle-internal": return mantleQueue(batch, env);
     case "billing-jobs": return consumeBilling(batch, env, ctx);

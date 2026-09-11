@@ -5,6 +5,9 @@ description: "Author a minimal Cloudflare Worker from scratch: one Schema, one p
 
 This page reproduces Core's minimal Worker reference as a from-scratch walkthrough. It is for engineers who want a running Mantle service on their machine in a few minutes, with no visitor frontend and no Cloudflare account.
 
+> **Version scope**
+> The install below uses the published `0.1.0-alpha.17` packages. That release supports this minimal Worker flow, but still includes `mantle create` and `mantle update` and does not contain this handbook. The rest of this handbook describes a later development snapshot; see [Versions](../reference/surface.md#versions) before applying its CLI and migration guidance to a registry installation.
+
 ## Prerequisites
 
 - Node.js 22 or newer.

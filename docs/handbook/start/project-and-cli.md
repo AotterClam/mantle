@@ -70,6 +70,7 @@ The binding exposes `mantle.views.<lowerCamelName>()`, `mantle.procedures.<name>
 ```sh
 pnpm install --frozen-lockfile
 pnpm exec mantle validate
+pnpm exec mantle generate
 pnpm exec mantle generate --check
 pnpm exec tsc --noEmit
 pnpm test                      # only when the project declares a test script
